@@ -17,6 +17,7 @@ export default function Settings({ ctx }) {
     doExport,
     doImport,
     clearAll,
+    clearTransactionsKeepSettings,
     signIn,
     signUp,
     signOut,
@@ -182,6 +183,21 @@ export default function Settings({ ctx }) {
       alert("All data cleared.");
     } catch (e) {
       alert(e?.message || "Failed to clear data.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onClearTransactions() {
+    const ok = confirm("Clear all transactions but keep your profile and budget settings?");
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await clearTransactionsKeepSettings();
+      setBackupText("");
+      alert("Transactions cleared.");
+    } catch (e) {
+      alert(e?.message || "Failed to clear transactions.");
     } finally {
       setBusy(false);
     }
@@ -485,6 +501,7 @@ export default function Settings({ ctx }) {
                   />
                 </label>
                 <button className="btn danger" onClick={onImport} disabled={busy}>Import (overwrite)</button>
+                <button className="btn danger" onClick={onClearTransactions} disabled={busy}>Clear transactions only</button>
                 <button className="btn danger" onClick={onClearAll} disabled={busy}>Clear all data</button>
               </div>
 

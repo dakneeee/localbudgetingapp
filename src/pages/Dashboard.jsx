@@ -16,7 +16,16 @@ function bucketBadge(bucketKey, remainingBase) {
 }
 
 export default function Dashboard({ ctx }) {
-  const { settings, ratesWarning, totalIncomeBase, allocatedBase, spentBase, remainingBase, amountBaseToDisplay } = ctx;
+  const {
+    settings,
+    ratesWarning,
+    budgetIncomeBase,
+    extraIncomeBase,
+    allocatedBase,
+    spentBase,
+    remainingBase,
+    amountBaseToDisplay
+  } = ctx;
   const display = settings.displayCurrency;
   const [infoOpen, setInfoOpen] = useState(false);
 
@@ -42,9 +51,15 @@ export default function Dashboard({ ctx }) {
           </button>
         </div>
         <div className="pill" data-tour="dashboard-income">
-          <span className="muted">Total income</span>
+          <span className="muted">{settings.period === "weekly" ? "Weekly budget" : "Monthly budget"}</span>
           <strong>
-            <Money value={toDisplay(totalIncomeBase)} currency={display} />
+            <Money value={toDisplay(budgetIncomeBase)} currency={display} />
+          </strong>
+        </div>
+        <div className="pill">
+          <span className="muted">Extra</span>
+          <strong>
+            <Money value={toDisplay(extraIncomeBase)} currency={display} />
           </strong>
         </div>
       </div>
@@ -80,7 +95,7 @@ export default function Dashboard({ ctx }) {
                       </div>
                     </div>
                     <div className="item">
-                      <div className="label">Spent</div>
+                      <div className="label">{b.key === "save_big" || b.key === "save_irregular" ? "Added" : "Spent"}</div>
                       <div className="value">
                         <Money value={toDisplay(spent)} currency={display} />
                       </div>

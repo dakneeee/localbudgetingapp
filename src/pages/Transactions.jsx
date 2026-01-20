@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Money from "../components/Money.jsx";
 import Modal from "../components/Modal.jsx";
 import { COMMON_CURRENCIES } from "../currency.js";
@@ -27,7 +27,44 @@ export default function Transactions({ ctx }) {
   const [catFilter, setCatFilter] = useState("all"); // category key
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [rangePreset, setRangePreset] = useState("all"); // all | week | month | day
   const [editId, setEditId] = useState(null);
+
+  function isoDaysAgo(days) {
+    const d = new Date();
+    d.setDate(d.getDate() - days);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  useEffect(() => {
+    if (rangePreset === "all") {
+      setFromDate("");
+      setToDate("");
+      return;
+    }
+    if (rangePreset === "day") {
+      const today = isoDaysAgo(0);
+      setFromDate(today);
+      setToDate(today);
+      return;
+    }
+    if (rangePreset === "week") {
+      setFromDate(isoDaysAgo(6));
+      setToDate(isoDaysAgo(0));
+      return;
+    }
+    if (rangePreset === "month") {
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const first = `${yyyy}-${mm}-01`;
+      setFromDate(first);
+      setToDate(isoDaysAgo(0));
+    }
+  }, [rangePreset]);
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -108,7 +145,7 @@ export default function Transactions({ ctx }) {
             </div>
           </div>
 
-          <div className="grid cols-2">
+          <div className="grid cols-3">
             <div className="field">
               <label>From date</label>
               <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
@@ -116,6 +153,15 @@ export default function Transactions({ ctx }) {
             <div className="field">
               <label>To date</label>
               <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Quick range</label>
+              <select value={rangePreset} onChange={(e) => setRangePreset(e.target.value)}>
+                <option value="all">All time</option>
+                <option value="day">Today</option>
+                <option value="week">Last 7 days</option>
+                <option value="month">This month</option>
+              </select>
             </div>
           </div>
 
@@ -210,6 +256,7 @@ function EditModal({
 
   const [incomeSource, setIncomeSource] = useState("Salary");
   const [incomeCustom, setIncomeCustom] = useState("");
+  const [incomeBucket, setIncomeBucket] = useState("budget");
 
   const [expenseCategory, setExpenseCategory] = useState("fixed");
   const [merchant, setMerchant] = useState("");
@@ -229,6 +276,13 @@ function EditModal({
       } else {
         setIncomeSource("Other");
         setIncomeCustom(src);
+      }
+      if (tx.incomeBucket) {
+        setIncomeBucket(tx.incomeBucket);
+      } else if (src === "Gift") {
+        setIncomeBucket("extra");
+      } else {
+        setIncomeBucket("budget");
       }
     } else {
       setExpenseCategory(tx.category || "fixed");
@@ -257,6 +311,7 @@ function EditModal({
         ...tx,
         date,
         amountBase: Math.abs(baseAbs),
+        incomeBucket,
         source: srcFinal,
         description: srcFinal,
         note: note.trim() || null,
@@ -311,6 +366,14 @@ function EditModal({
               <div className="field">
                 <label>Custom source (only used if Source = Other)</label>
                 <input value={incomeCustom} onChange={(e) => setIncomeCustom(e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Counts toward</label>
+                <select value={incomeBucket} onChange={(e) => setIncomeBucket(e.target.value)}>
+                  <option value="budget">Budget</option>
+                  <option value="extra">Extra</option>
+                  <option value="savings">Savings</option>
+                </select>
               </div>
             </div>
           ) : (

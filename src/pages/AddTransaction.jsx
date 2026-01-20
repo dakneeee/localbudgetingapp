@@ -10,12 +10,15 @@ export default function AddTransaction({ ctx }) {
     getRateToCurrency,
     amountCurrencyToBase,
     amountBaseToCurrency,
+    budgetIncomeBase,
+    extraIncomeBase,
     remainingBase,
     addOrUpdateTransaction
   } = ctx;
 
   const [mode, setMode] = useState("income"); // income | expense
   const [date, setDate] = useState(isoToday());
+  const [dateMode, setDateMode] = useState("today"); // today | yesterday | custom
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   const [amountCurrency, setAmountCurrency] = useState(settings.displayCurrency);
@@ -23,14 +26,31 @@ export default function AddTransaction({ ctx }) {
   // income fields
   const [incomeSource, setIncomeSource] = useState("Salary");
   const [incomeCustom, setIncomeCustom] = useState("");
+  const [otherBucket, setOtherBucket] = useState("budget"); // budget | extra
+  const [giftToSavings, setGiftToSavings] = useState(false);
 
   // expense fields
   const [expenseCategory, setExpenseCategory] = useState("fixed");
   const [merchant, setMerchant] = useState("");
+  const [expenseSource, setExpenseSource] = useState("budget"); // budget | extra
 
   const displayCurrency = settings.displayCurrency;
   const baseCurrency = settings.baseCurrency;
   const rateToInput = getRateToCurrency(amountCurrency);
+
+  function offsetIso(days) {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  React.useEffect(() => {
+    if (dateMode === "today") setDate(offsetIso(0));
+    if (dateMode === "yesterday") setDate(offsetIso(-1));
+  }, [dateMode]);
 
   const preview = useMemo(() => {
     const n = safeNumber(amount);
@@ -40,7 +60,10 @@ export default function AddTransaction({ ctx }) {
     return { base };
   }, [amount, amountCurrency, amountCurrencyToBase]);
 
-  const canConvert = rateToInput !== null;
+  const hasFunds = expenseSource === "extra"
+    ? extraIncomeBase > 0
+    : budgetIncomeBase > 0;
+  const canConvert = rateToInput !== null && (mode === "expense" ? hasFunds : true);
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -48,6 +71,10 @@ export default function AddTransaction({ ctx }) {
     const n = safeNumber(amount);
     if (!Number.isFinite(n) || n <= 0) {
       alert("Amount must be a positive number.");
+      return;
+    }
+    if (mode === "expense" && !hasFunds) {
+      alert(`No ${expenseSource} balance available. Add income first.`);
       return;
     }
     if (!canConvert) {
@@ -63,11 +90,17 @@ export default function AddTransaction({ ctx }) {
 
     if (mode === "income") {
       const sourceFinal = incomeSource === "Other" ? (incomeCustom.trim() || "Other") : incomeSource;
+      const incomeBucket = incomeSource === "Gift"
+        ? (giftToSavings ? "savings" : "extra")
+        : incomeSource === "Other"
+          ? (otherBucket === "extra" ? "extra" : "budget")
+          : "budget";
       const tx = {
         id: uuid(),
         type: "income",
         date,
         amountBase: base,
+        incomeBucket,
         inputCurrency: amountCurrency,
         source: sourceFinal,
         description: sourceFinal,
@@ -92,6 +125,7 @@ export default function AddTransaction({ ctx }) {
       type: "expense",
       date,
       amountBase: -Math.abs(base),
+      expenseSource,
       inputCurrency: amountCurrency,
       category: expenseCategory,
       source: catLabel,
@@ -109,6 +143,8 @@ export default function AddTransaction({ ctx }) {
 
   const amountDisplay = safeNumber(amount);
   const amountBaseForDisplay = preview?.base ?? null;
+  const budgetBalanceDisplay = amountBaseToCurrency(budgetIncomeBase || 0, displayCurrency);
+  const extraBalanceDisplay = amountBaseToCurrency(extraIncomeBase || 0, displayCurrency);
   const remainingBaseForCategory = mode === "expense" ? (remainingBase?.[expenseCategory] || 0) : null;
   const remainingAfterBase = mode === "expense" && Number.isFinite(amountBaseForDisplay)
     ? remainingBaseForCategory - Math.abs(amountBaseForDisplay)
@@ -133,6 +169,18 @@ export default function AddTransaction({ ctx }) {
             {rateToInput ? `1 ${baseCurrency} = ${rateToInput.toFixed(4)} ${amountCurrency}` : "—"}
           </strong>
         </div>
+        <div className="pill">
+          <span className="muted">Budget</span>
+          <strong className="mono">
+            <Money value={budgetBalanceDisplay ?? 0} currency={displayCurrency} />
+          </strong>
+        </div>
+        <div className="pill">
+          <span className="muted">Extra</span>
+          <strong className="mono">
+            <Money value={extraBalanceDisplay ?? 0} currency={displayCurrency} />
+          </strong>
+        </div>
       </div>
 
       {ratesWarning ? <div className="notice warn" style={{ marginBottom: 12 }}>{ratesWarning}</div> : null}
@@ -152,7 +200,11 @@ export default function AddTransaction({ ctx }) {
             <div className="grid cols-2">
               <div className="field">
                 <label>Date</label>
-                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                <select value={dateMode} onChange={(e) => setDateMode(e.target.value)}>
+                  <option value="today">Today</option>
+                  <option value="yesterday">Yesterday</option>
+                  <option value="custom">Pick a date</option>
+                </select>
               </div>
 
               <div className="field">
@@ -165,6 +217,13 @@ export default function AddTransaction({ ctx }) {
                 />
               </div>
             </div>
+
+            {dateMode === "custom" ? (
+              <div className="field">
+                <label>Custom date</label>
+                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              </div>
+            ) : null}
 
             <div className="field">
               <label>Amount currency</label>
@@ -189,25 +248,53 @@ export default function AddTransaction({ ctx }) {
                     onChange={(e) => setIncomeCustom(e.target.value)}
                   />
                 </div>
+                {incomeSource === "Other" ? (
+                  <div className="field">
+                    <label>Counts toward</label>
+                    <select value={otherBucket} onChange={(e) => setOtherBucket(e.target.value)}>
+                      <option value="budget">Budget</option>
+                      <option value="extra">Extra</option>
+                    </select>
+                  </div>
+                ) : null}
+                {incomeSource === "Gift" ? (
+                  <div className="field">
+                    <label>Add gift to savings?</label>
+                    <select
+                      value={giftToSavings ? "yes" : "no"}
+                      onChange={(e) => setGiftToSavings(e.target.value === "yes")}
+                    >
+                      <option value="no">No, keep as extra</option>
+                      <option value="yes">Yes, add to savings</option>
+                    </select>
+                  </div>
+                ) : null}
               </div>
-            ) : (
-              <div className="grid cols-2">
-                <div className="field">
-                  <label>Category</label>
-                  <select value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)}>
-                    {EXPENSE_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
-                  </select>
-                </div>
-                <div className="field">
-                  <label>Merchant / Label</label>
-                  <input
-                    placeholder="e.g., Rent, Starbucks, Phone bill"
-                    value={merchant}
-                    onChange={(e) => setMerchant(e.target.value)}
-                  />
-                </div>
+          ) : (
+            <div className="grid cols-2">
+              <div className="field">
+                <label>Category</label>
+                <select value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)}>
+                  {EXPENSE_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+                </select>
               </div>
-            )}
+              <div className="field">
+                <label>Merchant / Label</label>
+                <input
+                  placeholder="e.g., Rent, Starbucks, Phone bill"
+                  value={merchant}
+                  onChange={(e) => setMerchant(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label>Pay from</label>
+                <select value={expenseSource} onChange={(e) => setExpenseSource(e.target.value)}>
+                  <option value="budget">Budget</option>
+                  <option value="extra">Extra</option>
+                </select>
+              </div>
+            </div>
+          )}
 
             <div className="field">
               <label>Note (optional)</label>
@@ -260,7 +347,9 @@ export default function AddTransaction({ ctx }) {
               </button>
               {!canConvert ? (
                 <div className="notice warn" style={{ flex: 1 }}>
-                  Exchange rates unavailable. Go to Settings → Refresh rates.
+                  {rateToInput === null
+                    ? "Exchange rates unavailable. Go to Settings → Refresh rates."
+                    : `No ${expenseSource} balance available.`}
                 </div>
               ) : null}
             </div>

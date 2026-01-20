@@ -16,7 +16,7 @@ const steps = [
     path: "/",
     selector: '[data-tour="dashboard-income"]',
     title: "Total income",
-    body: "Add income first so the app can split it into budget buckets."
+    body: "This shows the income that counts toward your budget for the current period."
   },
   {
     id: "buckets",
@@ -51,7 +51,7 @@ const steps = [
     path: "/savings",
     selector: '[data-tour="savings-cards"]',
     title: "Savings tab",
-    body: "See how much you’ve allocated, spent, and have left for Big Goals and Irregular Expenses."
+    body: "Track Long‑Term Investments, Big Goals, and Irregular savings goals and how much you’ve saved so far."
   },
   {
     id: "transactions",

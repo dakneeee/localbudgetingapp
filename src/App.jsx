@@ -127,16 +127,36 @@ export default function App() {
     const incomes = transactions.filter(t => t.type === "income");
     const expenses = transactions.filter(t => t.type === "expense");
 
-    const totalIncomeBase = incomes.reduce((s, t) => s + (t.amountBase || 0), 0);
+    const budgetSources = new Set(["Salary", "Freelance", "Allowance", "Scholarship"]);
 
-    // Allocation amounts are based on total income and framework.
+    function incomeBucket(t) {
+      if (t.incomeBucket === "budget" || t.incomeBucket === "extra" || t.incomeBucket === "savings") {
+        return t.incomeBucket;
+      }
+      if (budgetSources.has(t.source)) return "budget";
+      if (t.source === "Gift") return "extra";
+      return "budget";
+    }
+
+    const totalIncomeBase = incomes.reduce((s, t) => s + (t.amountBase || 0), 0);
+    const budgetIncomeBase = incomes
+      .filter(t => incomeBucket(t) === "budget")
+      .reduce((s, t) => s + (t.amountBase || 0), 0);
+    const extraIncomeBase = incomes
+      .filter(t => incomeBucket(t) === "extra")
+      .reduce((s, t) => s + (t.amountBase || 0), 0);
+    const savingsExtraBase = incomes
+      .filter(t => incomeBucket(t) === "savings")
+      .reduce((s, t) => s + (t.amountBase || 0), 0);
+
+    // Allocation amounts are based on budget income and framework.
     const a = settings.allocations;
     const allocatedBase = {
-      fixed: totalIncomeBase * (a.fixedPct / 100),
-      invest: totalIncomeBase * (a.investPct / 100),
-      save_big: totalIncomeBase * (a.saveBigPct / 100),
-      save_irregular: totalIncomeBase * (a.saveIrregularPct / 100),
-      guiltfree: totalIncomeBase * (a.guiltFreePct / 100)
+      fixed: budgetIncomeBase * (a.fixedPct / 100),
+      invest: budgetIncomeBase * (a.investPct / 100),
+      save_big: budgetIncomeBase * (a.saveBigPct / 100),
+      save_irregular: budgetIncomeBase * (a.saveIrregularPct / 100),
+      guiltfree: budgetIncomeBase * (a.guiltFreePct / 100)
     };
 
     const spentBase = {
@@ -158,18 +178,17 @@ export default function App() {
     );
 
     // Savings-specific:
-    const savingsContribBase = {
+    const savingsGoalBase = {
+      longTerm: allocatedBase.invest,
       big: allocatedBase.save_big,
       irregular: allocatedBase.save_irregular
     };
-    const savingsSpentBase = {
-      big: spentBase.save_big,
-      irregular: spentBase.save_irregular
+    const savingsSavedBase = {
+      longTerm: allocatedBase.invest - spentBase.invest,
+      big: allocatedBase.save_big - spentBase.save_big,
+      irregular: allocatedBase.save_irregular - spentBase.save_irregular
     };
-    const savingsRemainingBase = {
-      big: savingsContribBase.big - savingsSpentBase.big,
-      irregular: savingsContribBase.irregular - savingsSpentBase.irregular
-    };
+    const savingsTotalBase = savingsSavedBase.longTerm + savingsSavedBase.big + savingsSavedBase.irregular + savingsExtraBase;
 
     // CRUD helpers:
     async function refreshTransactions() {
@@ -256,6 +275,18 @@ export default function App() {
 
     async function clearAll() {
       await clearAllAndImport({ settings: null, transactions: [], rates: [] });
+      const s = await loadSettings();
+      const txs = await listTransactions();
+      setSettings(s);
+      setTransactions(txs);
+      const { rates, warning } = await ensureRates(s.baseCurrency);
+      setRatesRecord(rates);
+      setRatesWarning(warning);
+    }
+
+    async function clearTransactionsKeepSettings() {
+      const currentSettings = await loadSettings();
+      await clearAllAndImport({ settings: currentSettings, transactions: [], rates: [] });
       const s = await loadSettings();
       const txs = await listTransactions();
       setSettings(s);
@@ -463,12 +494,15 @@ export default function App() {
       ratesWarning,
       allocValidation,
       totalIncomeBase,
+      budgetIncomeBase,
+      extraIncomeBase,
+      savingsExtraBase,
       allocatedBase,
       spentBase,
       remainingBase,
-      savingsContribBase,
-      savingsSpentBase,
-      savingsRemainingBase,
+      savingsGoalBase,
+      savingsSavedBase,
+      savingsTotalBase,
       rateToDisplay,
       amountBaseToDisplay,
       amountDisplayToBase,
@@ -483,6 +517,7 @@ export default function App() {
       doExport,
       doImport,
       clearAll,
+      clearTransactionsKeepSettings,
       signUp,
       signIn,
       signOut,
