@@ -300,20 +300,33 @@ export default function App() {
       setTransactions(txs);
     }
 
+    async function autoSyncIfEnabled() {
+      if (!session?.user?.id) return;
+      try {
+        await syncNow();
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn("Auto-sync failed:", e);
+      }
+    }
+
     async function addOrUpdateTransaction(tx) {
       await upsertTransaction(tx);
       await refreshTransactions();
+      await autoSyncIfEnabled();
     }
 
     async function removeTransaction(id) {
       await deleteTransaction(id);
       await refreshTransactions();
+      await autoSyncIfEnabled();
     }
 
     async function updateSettings(partial) {
       const next = { ...settings, ...partial, updatedAt: Date.now() };
       setSettings(next);
       await saveSettings(next);
+      await autoSyncIfEnabled();
     }
 
     async function refreshRatesNow() {
@@ -375,6 +388,7 @@ export default function App() {
       const { rates, warning } = await ensureRates(s.baseCurrency);
       setRatesRecord(rates);
       setRatesWarning(warning);
+      await autoSyncIfEnabled();
     }
 
     async function clearAll() {
@@ -386,6 +400,7 @@ export default function App() {
       const { rates, warning } = await ensureRates(s.baseCurrency);
       setRatesRecord(rates);
       setRatesWarning(warning);
+      await autoSyncIfEnabled();
     }
 
     async function clearTransactionsKeepSettings() {
@@ -398,6 +413,7 @@ export default function App() {
       const { rates, warning } = await ensureRates(s.baseCurrency);
       setRatesRecord(rates);
       setRatesWarning(warning);
+      await autoSyncIfEnabled();
     }
 
     async function signUp(email, password) {
