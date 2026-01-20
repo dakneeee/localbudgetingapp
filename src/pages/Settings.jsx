@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { COMMON_CURRENCIES } from "../currency.js";
-import { DEFAULT_THEME_KEY, THEMES } from "../themes.js";
+import { DEFAULT_THEME_KEY } from "../themes.js";
 import { defaultAllocations, safeNumber, validateAllocations } from "../utils.js";
 
 export default function Settings({ ctx }) {
@@ -22,7 +22,6 @@ export default function Settings({ ctx }) {
   const [baseCurrency, setBaseCurrency] = useState(settings.baseCurrency);
   const [displayCurrency, setDisplayCurrency] = useState(settings.displayCurrency);
   const [name, setName] = useState(settings.name || "");
-  const [theme, setTheme] = useState(settings.theme || DEFAULT_THEME_KEY);
 
   const [backupText, setBackupText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -50,7 +49,7 @@ export default function Settings({ ctx }) {
       name: name.trim(),
       period,
       displayCurrency,
-      theme,
+      theme: DEFAULT_THEME_KEY,
       allocations: computedAlloc.a
     });
 
@@ -170,13 +169,6 @@ export default function Settings({ ctx }) {
               <div className="field">
                 <label>Name (for greeting)</label>
                 <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" />
-              </div>
-
-              <div className="field" style={{ marginTop: 10 }}>
-                <label>Color theme</label>
-                <select value={theme} onChange={(e) => setTheme(e.target.value)}>
-                  {THEMES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
-                </select>
               </div>
 
               <h3 style={{ marginTop: 16 }}>Budget period</h3>

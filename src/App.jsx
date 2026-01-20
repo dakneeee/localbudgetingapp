@@ -55,9 +55,8 @@ export default function App() {
   }, [settings?.baseCurrency]);
 
   useEffect(() => {
-    const key = THEME_KEYS.includes(settings?.theme) ? settings.theme : DEFAULT_THEME_KEY;
-    document.documentElement.dataset.theme = key;
-  }, [settings?.theme]);
+    document.documentElement.dataset.theme = DEFAULT_THEME_KEY;
+  }, []);
 
   const ctx = useMemo(() => {
     if (!settings) return null;
