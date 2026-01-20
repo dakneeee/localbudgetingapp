@@ -69,7 +69,7 @@ export default function AddTransaction({ ctx }) {
   }, [amount, amountCurrency, amountCurrencyToBase]);
 
   const hasFunds = (mode === "expense" ? expenseSource : savingsSource) === "extra"
-    ? extraIncomeBase > 0
+    ? (extraBalanceBase ?? extraIncomeBase) > 0
     : budgetIncomeBase > 0;
   const canConvert = rateToInput !== null && (mode === "expense" ? hasFunds : true);
 
