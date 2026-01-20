@@ -11,6 +11,12 @@ npm run dev
 
 Then open the local URL printed in the terminal.
 
+## License
+
+This project is shared for viewing purposes only.
+© 2026 Daniella Joei Manilla. All rights reserved.
+No permission is granted to use, modify, or redistribute without explicit consent.
+
 # React + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
