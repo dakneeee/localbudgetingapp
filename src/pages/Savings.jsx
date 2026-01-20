@@ -50,7 +50,7 @@ export default function Savings({ ctx }) {
 
       <div className="panel">
         <div className="panel-inner">
-          <div className="grid cols-2">
+          <div className="grid cols-2" data-tour="savings-cards">
             <div className="card">
               <div className="row">
                 <h3 style={{ margin: 0 }}>Big Goals</h3>

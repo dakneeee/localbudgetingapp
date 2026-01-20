@@ -27,7 +27,13 @@ export async function getDB() {
 export async function loadSettings() {
   const db = await getDB();
   const s = await db.get("settings", "app");
-  if (s) return s;
+  if (s) {
+    if (!s.updatedAt) {
+      s.updatedAt = Date.now();
+      await db.put("settings", s, "app");
+    }
+    return s;
+  }
 
   const defaults = {
     period: "monthly", // "weekly" | "monthly"
@@ -36,7 +42,8 @@ export async function loadSettings() {
     name: "",
     theme: DEFAULT_THEME_KEY,
     allocations: defaultAllocations(),
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    updatedAt: Date.now()
   };
   await db.put("settings", defaults, "app");
   return defaults;

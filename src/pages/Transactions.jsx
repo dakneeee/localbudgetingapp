@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import Money from "../components/Money.jsx";
 import Modal from "../components/Modal.jsx";
+import { COMMON_CURRENCIES } from "../currency.js";
 import { EXPENSE_CATEGORIES, INCOME_SOURCES, cmpDateDesc, formatDatePretty, isoToday, safeNumber } from "../utils.js";
 
 function categoryLabel(key) {
@@ -13,13 +14,13 @@ export default function Transactions({ ctx }) {
     settings,
     ratesWarning,
     transactions,
-    amountBaseToDisplay,
-    amountDisplayToBase,
+    amountBaseToCurrency,
+    amountCurrencyToBase,
     removeTransaction,
     addOrUpdateTransaction
   } = ctx;
 
-  const display = settings.displayCurrency;
+  const [displayCurrency, setDisplayCurrency] = useState(settings.displayCurrency);
 
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter] = useState("all"); // all | income | expense
@@ -56,7 +57,7 @@ export default function Transactions({ ctx }) {
   }, [editId, transactions]);
 
   function toDisplay(n) {
-    const v = amountBaseToDisplay(n);
+    const v = amountBaseToCurrency(n, displayCurrency);
     return v ?? 0;
   }
 
@@ -75,13 +76,15 @@ export default function Transactions({ ctx }) {
         </div>
         <div className="pill">
           <span className="muted">Display</span>
-          <strong className="mono">{display}</strong>
+          <select value={displayCurrency} onChange={(e) => setDisplayCurrency(e.target.value)}>
+            {COMMON_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
         </div>
       </div>
 
       {ratesWarning ? <div className="notice warn" style={{ marginBottom: 12 }}>{ratesWarning}</div> : null}
 
-      <div className="panel">
+      <div className="panel" data-tour="transactions-panel">
         <div className="panel-inner">
           <div className="grid cols-3">
             <div className="field">
@@ -124,7 +127,7 @@ export default function Transactions({ ctx }) {
                   <th style={{ minWidth: 90 }}>Type</th>
                   <th style={{ minWidth: 170 }}>Source / Category</th>
                   <th>Description</th>
-                  <th style={{ minWidth: 140 }}>Amount ({display})</th>
+                  <th style={{ minWidth: 140 }}>Amount ({displayCurrency})</th>
                   <th style={{ minWidth: 140 }}>Base Amount</th>
                   <th style={{ minWidth: 150 }}>Actions</th>
                 </tr>
@@ -150,7 +153,7 @@ export default function Transactions({ ctx }) {
                           {t.note ? <div className="muted" style={{ marginTop: 4 }}>{t.note}</div> : null}
                         </td>
                         <td className="mono">
-                          <Money value={amtDisp} currency={display} showSign />
+                          <Money value={amtDisp} currency={displayCurrency} showSign />
                         </td>
                         <td className="mono">
                           <Money value={amtBase} currency={settings.baseCurrency} showSign />
@@ -180,16 +183,26 @@ export default function Transactions({ ctx }) {
         tx={editingTx}
         onClose={() => setEditId(null)}
         settings={settings}
-        amountBaseToDisplay={amountBaseToDisplay}
-        amountDisplayToBase={amountDisplayToBase}
+        displayCurrency={displayCurrency}
+        amountBaseToCurrency={amountBaseToCurrency}
+        amountCurrencyToBase={amountCurrencyToBase}
         addOrUpdateTransaction={addOrUpdateTransaction}
       />
     </div>
   );
 }
 
-function EditModal({ open, tx, onClose, settings, amountBaseToDisplay, amountDisplayToBase, addOrUpdateTransaction }) {
-  const display = settings.displayCurrency;
+function EditModal({
+  open,
+  tx,
+  onClose,
+  settings,
+  displayCurrency,
+  amountBaseToCurrency,
+  amountCurrencyToBase,
+  addOrUpdateTransaction
+}) {
+  const display = displayCurrency;
 
   const [date, setDate] = useState(isoToday());
   const [amount, setAmount] = useState("");
@@ -204,7 +217,7 @@ function EditModal({ open, tx, onClose, settings, amountBaseToDisplay, amountDis
   React.useEffect(() => {
     if (!tx) return;
     setDate(tx.date || isoToday());
-    const amtDisp = amountBaseToDisplay(tx.amountBase || 0);
+    const amtDisp = amountBaseToCurrency(tx.amountBase || 0, display);
     setAmount(Number.isFinite(amtDisp) ? String(Math.abs(amtDisp)) : "");
     setNote(tx.note || "");
 
@@ -221,7 +234,7 @@ function EditModal({ open, tx, onClose, settings, amountBaseToDisplay, amountDis
       setExpenseCategory(tx.category || "fixed");
       setMerchant(tx.description || "");
     }
-  }, [tx, amountBaseToDisplay]);
+  }, [tx, amountBaseToCurrency, display]);
 
   async function onSave() {
     if (!tx) return;
@@ -232,7 +245,7 @@ function EditModal({ open, tx, onClose, settings, amountBaseToDisplay, amountDis
       return;
     }
 
-    const baseAbs = amountDisplayToBase(n);
+    const baseAbs = amountCurrencyToBase(n, display);
     if (!Number.isFinite(baseAbs) || baseAbs <= 0) {
       alert("Could not convert amount to base. Try refreshing exchange rates in Settings.");
       return;

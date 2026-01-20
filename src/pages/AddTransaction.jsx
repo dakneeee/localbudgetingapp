@@ -1,14 +1,24 @@
 import React, { useMemo, useState } from "react";
 import Money from "../components/Money.jsx";
+import { COMMON_CURRENCIES } from "../currency.js";
 import { EXPENSE_CATEGORIES, INCOME_SOURCES, isoToday, safeNumber, uuid, formatDatePretty } from "../utils.js";
 
 export default function AddTransaction({ ctx }) {
-  const { settings, ratesWarning, rateToDisplay, amountDisplayToBase, amountBaseToDisplay, addOrUpdateTransaction } = ctx;
+  const {
+    settings,
+    ratesWarning,
+    getRateToCurrency,
+    amountCurrencyToBase,
+    amountBaseToCurrency,
+    remainingBase,
+    addOrUpdateTransaction
+  } = ctx;
 
   const [mode, setMode] = useState("income"); // income | expense
   const [date, setDate] = useState(isoToday());
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  const [amountCurrency, setAmountCurrency] = useState(settings.displayCurrency);
 
   // income fields
   const [incomeSource, setIncomeSource] = useState("Salary");
@@ -19,16 +29,18 @@ export default function AddTransaction({ ctx }) {
   const [merchant, setMerchant] = useState("");
 
   const displayCurrency = settings.displayCurrency;
+  const baseCurrency = settings.baseCurrency;
+  const rateToInput = getRateToCurrency(amountCurrency);
 
   const preview = useMemo(() => {
     const n = safeNumber(amount);
     if (!Number.isFinite(n) || n <= 0) return null;
-    const base = amountDisplayToBase(n);
+    const base = amountCurrencyToBase(n, amountCurrency);
     if (!Number.isFinite(base)) return null;
     return { base };
-  }, [amount, amountDisplayToBase]);
+  }, [amount, amountCurrency, amountCurrencyToBase]);
 
-  const canConvert = rateToDisplay !== null;
+  const canConvert = rateToInput !== null;
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -43,7 +55,7 @@ export default function AddTransaction({ ctx }) {
       return;
     }
 
-    const base = amountDisplayToBase(n);
+    const base = amountCurrencyToBase(n, amountCurrency);
     if (!Number.isFinite(base) || base <= 0) {
       alert("Could not convert amount to base currency. Try refreshing rates.");
       return;
@@ -56,6 +68,7 @@ export default function AddTransaction({ ctx }) {
         type: "income",
         date,
         amountBase: base,
+        inputCurrency: amountCurrency,
         source: sourceFinal,
         description: sourceFinal,
         note: note.trim() || null,
@@ -79,6 +92,7 @@ export default function AddTransaction({ ctx }) {
       type: "expense",
       date,
       amountBase: -Math.abs(base),
+      inputCurrency: amountCurrency,
       category: expenseCategory,
       source: catLabel,
       description: label,
@@ -95,7 +109,13 @@ export default function AddTransaction({ ctx }) {
 
   const amountDisplay = safeNumber(amount);
   const amountBaseForDisplay = preview?.base ?? null;
-  const baseCurrency = settings.baseCurrency;
+  const remainingBaseForCategory = mode === "expense" ? (remainingBase?.[expenseCategory] || 0) : null;
+  const remainingAfterBase = mode === "expense" && Number.isFinite(amountBaseForDisplay)
+    ? remainingBaseForCategory - Math.abs(amountBaseForDisplay)
+    : remainingBaseForCategory;
+  const remainingAfterDisplay = Number.isFinite(remainingAfterBase)
+    ? amountBaseToCurrency(remainingAfterBase, displayCurrency)
+    : null;
 
   return (
     <div className="container">
@@ -110,14 +130,14 @@ export default function AddTransaction({ ctx }) {
         <div className="pill">
           <span className="muted">Rate</span>
           <strong className="mono">
-            {rateToDisplay ? `1 ${baseCurrency} = ${rateToDisplay.toFixed(4)} ${displayCurrency}` : "—"}
+            {rateToInput ? `1 ${baseCurrency} = ${rateToInput.toFixed(4)} ${amountCurrency}` : "—"}
           </strong>
         </div>
       </div>
 
       {ratesWarning ? <div className="notice warn" style={{ marginBottom: 12 }}>{ratesWarning}</div> : null}
 
-      <div className="panel">
+      <div className="panel" data-tour="add-form">
         <div className="panel-inner">
           <div className="actions" style={{ marginTop: 0 }}>
             <button className={`btn ${mode === "income" ? "primary" : ""}`} onClick={() => setMode("income")}>
@@ -136,7 +156,7 @@ export default function AddTransaction({ ctx }) {
               </div>
 
               <div className="field">
-                <label>Amount ({displayCurrency})</label>
+                <label>Amount ({amountCurrency})</label>
                 <input
                   inputMode="decimal"
                   placeholder="0.00"
@@ -144,6 +164,13 @@ export default function AddTransaction({ ctx }) {
                   onChange={(e) => setAmount(e.target.value)}
                 />
               </div>
+            </div>
+
+            <div className="field">
+              <label>Amount currency</label>
+              <select value={amountCurrency} onChange={(e) => setAmountCurrency(e.target.value)}>
+                {COMMON_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
             </div>
 
             {mode === "income" ? (
@@ -195,7 +222,7 @@ export default function AddTransaction({ ctx }) {
                     {Number.isFinite(amountDisplay) && amountDisplay > 0 ? (
                       <>
                         <strong>
-                          <Money value={amountDisplay} currency={displayCurrency} />
+                          <Money value={amountDisplay} currency={amountCurrency} />
                         </strong>{" "}
                         on <span className="mono">{formatDatePretty(date)}</span>
                       </>
@@ -215,6 +242,16 @@ export default function AddTransaction({ ctx }) {
                   </div>
                 </div>
               </div>
+              {mode === "expense" ? (
+                <div className="row" style={{ marginTop: 8 }}>
+                  <div className="muted">Remaining after this expense</div>
+                  <div className="mono">
+                    {Number.isFinite(remainingAfterDisplay)
+                      ? <Money value={remainingAfterDisplay} currency={displayCurrency} showSign />
+                      : "—"}
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="actions">

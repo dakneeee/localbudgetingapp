@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, useLocation } from "react-router-dom";
 import BottomTabs from "./components/BottomTabs.jsx";
+import AuthScreen from "./components/AuthScreen.jsx";
+import Tour from "./components/Tour.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import AddTransaction from "./pages/AddTransaction.jsx";
 import Savings from "./pages/Savings.jsx";
 import Transactions from "./pages/Transactions.jsx";
 import Settings from "./pages/Settings.jsx";
-import { DEFAULT_THEME_KEY, THEME_KEYS } from "./themes.js";
+import { DEFAULT_THEME_KEY } from "./themes.js";
 
 import {
   loadSettings,
@@ -20,6 +22,9 @@ import {
 
 import { ensureRates, convertBaseToDisplay, convertDisplayToBase, getRate } from "./currency.js";
 import { validateAllocations } from "./utils.js";
+import { supabase } from "./supabase.js";
+
+const SYNC_KEY_PREFIX = "ledgerleaf_sync_";
 
 export default function App() {
   const [settings, setSettings] = useState(null);
@@ -27,6 +32,22 @@ export default function App() {
   const [ratesRecord, setRatesRecord] = useState(null);
   const [ratesWarning, setRatesWarning] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [session, setSession] = useState(null);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncConflicts, setSyncConflicts] = useState(null);
+  const [lastSyncAt, setLastSyncAt] = useState(0);
+  const location = useLocation();
+
+  function getLastSync(userId) {
+    if (!userId) return 0;
+    return Number(localStorage.getItem(`${SYNC_KEY_PREFIX}${userId}`)) || 0;
+  }
+
+  function setLastSync(userId, ts) {
+    if (!userId) return;
+    localStorage.setItem(`${SYNC_KEY_PREFIX}${userId}`, String(ts));
+    setLastSyncAt(ts);
+  }
 
   // Load settings + transactions
   useEffect(() => {
@@ -37,6 +58,19 @@ export default function App() {
       setTransactions(txs);
       setLoading(false);
     })();
+  }, []);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      const nextSession = data?.session || null;
+      setSession(nextSession);
+      setLastSyncAt(getLastSync(nextSession?.user?.id));
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setLastSyncAt(getLastSync(nextSession?.user?.id));
+    });
+    return () => sub?.subscription?.unsubscribe();
   }, []);
 
   // Load / refresh rates when base currency changes
@@ -72,6 +106,21 @@ export default function App() {
     function amountDisplayToBase(amountDisplay) {
       if (!ratesRecord) return null;
       return convertDisplayToBase(amountDisplay, ratesRecord, settings.displayCurrency);
+    }
+
+    function getRateToCurrency(currency) {
+      if (!ratesRecord) return null;
+      return getRate(ratesRecord, currency);
+    }
+
+    function amountBaseToCurrency(amountBase, currency) {
+      if (!ratesRecord) return null;
+      return convertBaseToDisplay(amountBase, ratesRecord, currency);
+    }
+
+    function amountCurrencyToBase(amountDisplay, currency) {
+      if (!ratesRecord) return null;
+      return convertDisplayToBase(amountDisplay, ratesRecord, currency);
     }
 
     // Derived totals:
@@ -139,7 +188,7 @@ export default function App() {
     }
 
     async function updateSettings(partial) {
-      const next = { ...settings, ...partial };
+      const next = { ...settings, ...partial, updatedAt: Date.now() };
       setSettings(next);
       await saveSettings(next);
     }
@@ -205,6 +254,208 @@ export default function App() {
       setRatesWarning(warning);
     }
 
+    async function clearAll() {
+      await clearAllAndImport({ settings: null, transactions: [], rates: [] });
+      const s = await loadSettings();
+      const txs = await listTransactions();
+      setSettings(s);
+      setTransactions(txs);
+      const { rates, warning } = await ensureRates(s.baseCurrency);
+      setRatesRecord(rates);
+      setRatesWarning(warning);
+    }
+
+    async function signUp(email, password) {
+      return supabase.auth.signUp({ email, password });
+    }
+
+    async function signIn(email, password) {
+      return supabase.auth.signInWithPassword({ email, password });
+    }
+
+    async function signOut() {
+      await supabase.auth.signOut();
+      setSyncConflicts(null);
+      setLastSyncAt(0);
+    }
+
+    function toMs(value) {
+      if (Number.isFinite(value)) return value;
+      const d = new Date(value);
+      return Number.isFinite(d.getTime()) ? d.getTime() : 0;
+    }
+
+    async function syncNow() {
+      if (!session?.user?.id) {
+        throw new Error("Sign in to sync.");
+      }
+      const userId = session.user.id;
+      setSyncBusy(true);
+      setSyncConflicts(null);
+      try {
+        const localSettings = await loadSettings();
+        const localTxs = await listTransactions();
+        const lastSync = getLastSync(userId);
+
+        const { data: remoteSettingsRow, error: settingsErr } = await supabase
+          .from("user_settings")
+          .select("data, updated_at")
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (settingsErr) throw settingsErr;
+
+        const { data: remoteTxRows, error: txErr } = await supabase
+          .from("transactions")
+          .select("id, data, updated_at")
+          .eq("user_id", userId);
+        if (txErr) throw txErr;
+
+        const conflicts = { settings: null, transactions: [] };
+        const localTxMap = new Map(localTxs.map(t => [t.id, t]));
+        const remoteTxMap = new Map((remoteTxRows || []).map(r => [r.id, r]));
+
+        const localSettingsUpdated = Number(localSettings.updatedAt) || 0;
+        const remoteSettingsUpdated = remoteSettingsRow
+          ? (Number(remoteSettingsRow.data?.updatedAt) || toMs(remoteSettingsRow.updated_at))
+          : 0;
+
+        if (remoteSettingsRow) {
+          if (localSettingsUpdated > lastSync && remoteSettingsUpdated > lastSync && localSettingsUpdated !== remoteSettingsUpdated) {
+            conflicts.settings = { local: localSettings, remote: remoteSettingsRow.data };
+          } else if (remoteSettingsUpdated > localSettingsUpdated) {
+            const next = { ...remoteSettingsRow.data, updatedAt: remoteSettingsUpdated || Date.now() };
+            await saveSettings(next);
+          }
+        }
+
+        const toPushTxs = [];
+        const toPullTxs = [];
+
+        for (const [id, row] of remoteTxMap.entries()) {
+          const remoteData = { ...row.data, id };
+          const remoteUpdated = Number(remoteData.updatedAt) || toMs(row.updated_at);
+          const local = localTxMap.get(id);
+          if (!local) {
+            toPullTxs.push({ ...remoteData, updatedAt: remoteUpdated || Date.now() });
+            continue;
+          }
+          const localUpdated = Number(local.updatedAt) || Number(local.createdAt) || 0;
+          if (localUpdated > lastSync && remoteUpdated > lastSync && localUpdated !== remoteUpdated) {
+            conflicts.transactions.push({ id, local, remote: remoteData });
+            continue;
+          }
+          if (remoteUpdated > localUpdated) {
+            toPullTxs.push({ ...remoteData, updatedAt: remoteUpdated || Date.now() });
+          } else if (localUpdated > remoteUpdated) {
+            toPushTxs.push(local);
+          }
+        }
+
+        for (const [id, local] of localTxMap.entries()) {
+          if (remoteTxMap.has(id)) continue;
+          toPushTxs.push(local);
+        }
+
+        if (toPullTxs.length) {
+          for (const t of toPullTxs) await upsertTransaction(t);
+        }
+
+        if (conflicts.settings || conflicts.transactions.length) {
+          setSyncConflicts(conflicts);
+          return { conflicts: true };
+        }
+
+        if (localSettingsUpdated > remoteSettingsUpdated) {
+          await supabase.from("user_settings").upsert(
+            {
+              user_id: userId,
+              data: localSettings,
+              updated_at: new Date(localSettingsUpdated).toISOString()
+            },
+            { onConflict: "user_id" }
+          );
+        }
+
+        if (toPushTxs.length) {
+          const rows = toPushTxs.map(t => ({
+            id: t.id,
+            user_id: userId,
+            data: t,
+            updated_at: new Date(Number(t.updatedAt) || Date.now()).toISOString()
+          }));
+          await supabase.from("transactions").upsert(rows, { onConflict: "id" });
+        }
+
+        const now = Date.now();
+        setLastSync(userId, now);
+        const s = await loadSettings();
+        const txs = await listTransactions();
+        setSettings(s);
+        setTransactions(txs);
+        return { conflicts: false };
+      } finally {
+        setSyncBusy(false);
+      }
+    }
+
+    async function resolveSyncConflicts({ settingsChoice, txChoices }) {
+      if (!session?.user?.id || !syncConflicts) return;
+      const userId = session.user.id;
+      setSyncBusy(true);
+      try {
+        const toPushTxs = [];
+        const toPullTxs = [];
+
+        for (const item of syncConflicts.transactions) {
+          const choice = txChoices?.[item.id] || "local";
+          if (choice === "local") toPushTxs.push(item.local);
+          if (choice === "remote") toPullTxs.push(item.remote);
+        }
+
+        if (syncConflicts.settings) {
+          if (settingsChoice === "remote") {
+            const remoteSettings = syncConflicts.settings.remote;
+            const updatedAt = Number(remoteSettings.updatedAt) || Date.now();
+            await saveSettings({ ...remoteSettings, updatedAt });
+          } else {
+            const localSettings = syncConflicts.settings.local;
+            await supabase.from("user_settings").upsert(
+              {
+                user_id: userId,
+                data: localSettings,
+                updated_at: new Date(Number(localSettings.updatedAt) || Date.now()).toISOString()
+              },
+              { onConflict: "user_id" }
+            );
+          }
+        }
+
+        if (toPullTxs.length) {
+          for (const t of toPullTxs) await upsertTransaction(t);
+        }
+
+        if (toPushTxs.length) {
+          const rows = toPushTxs.map(t => ({
+            id: t.id,
+            user_id: userId,
+            data: t,
+            updated_at: new Date(Number(t.updatedAt) || Date.now()).toISOString()
+          }));
+          await supabase.from("transactions").upsert(rows, { onConflict: "id" });
+        }
+
+        const now = Date.now();
+        setLastSync(userId, now);
+        setSyncConflicts(null);
+        const s = await loadSettings();
+        const txs = await listTransactions();
+        setSettings(s);
+        setTransactions(txs);
+      } finally {
+        setSyncBusy(false);
+      }
+    }
+
     return {
       settings,
       transactions,
@@ -221,15 +472,28 @@ export default function App() {
       rateToDisplay,
       amountBaseToDisplay,
       amountDisplayToBase,
+      getRateToCurrency,
+      amountBaseToCurrency,
+      amountCurrencyToBase,
       addOrUpdateTransaction,
       removeTransaction,
       updateSettings,
       refreshRatesNow,
       migrateBaseCurrency,
       doExport,
-      doImport
+      doImport,
+      clearAll,
+      signUp,
+      signIn,
+      signOut,
+      syncNow,
+      resolveSyncConflicts,
+      syncConflicts,
+      syncBusy,
+      session,
+      lastSyncAt
     };
-  }, [settings, transactions, ratesRecord, ratesWarning]);
+  }, [settings, transactions, ratesRecord, ratesWarning, session, syncConflicts, syncBusy, lastSyncAt]);
 
   if (loading || !ctx) {
     return (
@@ -249,15 +513,22 @@ export default function App() {
     );
   }
 
+  if (!session) {
+    return <AuthScreen onSignIn={ctx.signIn} onSignUp={ctx.signUp} />;
+  }
+
   return (
     <>
-      <Routes>
+      <div className="page" key={location.pathname}>
+        <Routes location={location}>
         <Route path="/" element={<Dashboard ctx={ctx} />} />
         <Route path="/add" element={<AddTransaction ctx={ctx} />} />
         <Route path="/savings" element={<Savings ctx={ctx} />} />
         <Route path="/transactions" element={<Transactions ctx={ctx} />} />
         <Route path="/settings" element={<Settings ctx={ctx} />} />
-      </Routes>
+        </Routes>
+      </div>
+      <Tour />
       <BottomTabs />
     </>
   );

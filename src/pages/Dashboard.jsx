@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import Money from "../components/Money.jsx";
+import Modal from "../components/Modal.jsx";
 import { BUCKETS } from "../utils.js";
 
 function bucketBadge(bucketKey, remainingBase) {
@@ -17,6 +18,7 @@ function bucketBadge(bucketKey, remainingBase) {
 export default function Dashboard({ ctx }) {
   const { settings, ratesWarning, totalIncomeBase, allocatedBase, spentBase, remainingBase, amountBaseToDisplay } = ctx;
   const display = settings.displayCurrency;
+  const [infoOpen, setInfoOpen] = useState(false);
 
   function toDisplay(n) {
     const v = amountBaseToDisplay(n);
@@ -24,17 +26,22 @@ export default function Dashboard({ ctx }) {
   }
 
   return (
-    <div className="container">
+    <>
+      <div className="container">
       <div className="header">
-        <div className="title">
+        <div className="title" data-tour="dashboard-title">
           <h1>Dashboard</h1>
           <p>Hello, <span className="mono">{settings.name?.trim() ? settings.name.trim() : "there"}</span>.</p>
           <p>
             Period: <span className="mono">{settings.period.toUpperCase()}</span>. Base currency stored internally as{" "}
             <span className="mono">{settings.baseCurrency}</span>.
           </p>
+          <button className="icon-btn" type="button" onClick={() => setInfoOpen(true)} data-tour="framework-info">
+            <span aria-hidden="true">i</span>
+            <span className="sr-only">Explain the budgeting framework</span>
+          </button>
         </div>
-        <div className="pill">
+        <div className="pill" data-tour="dashboard-income">
           <span className="muted">Total income</span>
           <strong>
             <Money value={toDisplay(totalIncomeBase)} currency={display} />
@@ -46,7 +53,7 @@ export default function Dashboard({ ctx }) {
 
       <div className="panel">
         <div className="panel-inner">
-          <div className="grid cols-2">
+          <div className="grid cols-2" data-tour="dashboard-buckets">
             {BUCKETS.map((b) => {
               const alloc = allocatedBase[b.key] || 0;
               const spent = spentBase[b.key] || 0;
@@ -102,5 +109,38 @@ export default function Dashboard({ ctx }) {
         </div>
       </div>
     </div>
+
+      <Modal open={infoOpen} title="Budget framework explained" onClose={() => setInfoOpen(false)}>
+      <div className="notice" style={{ marginBottom: 10 }}>
+        This app splits your income into simple buckets so you know what each part of your money is for.
+      </div>
+      <div className="grid">
+        <div className="card">
+          <h3>Fixed Costs</h3>
+          <p className="sub">Rent, bills, groceries, and anything you must pay.</p>
+        </div>
+        <div className="card">
+          <h3>Long‑Term Investments</h3>
+          <p className="sub">Savings/investing for your future (retirement, education, etc.).</p>
+        </div>
+        <div className="card">
+          <h3>Savings: Big Goals</h3>
+          <p className="sub">Planned goals like travel, a laptop, or a big purchase.</p>
+        </div>
+        <div className="card">
+          <h3>Savings: Irregular Expenses</h3>
+          <p className="sub">Non‑monthly costs like birthdays, repairs, or annual fees.</p>
+        </div>
+        <div className="card">
+          <h3>Guilt‑Free Spending</h3>
+          <p className="sub">Fun money you can spend without stress.</p>
+        </div>
+      </div>
+      <div className="notice" style={{ marginTop: 10 }}>
+        The Savings tab shows how much you’ve contributed and spent in both savings buckets.
+        The Transactions tab shows every income and expense in one list.
+      </div>
+      </Modal>
+    </>
   );
 }
