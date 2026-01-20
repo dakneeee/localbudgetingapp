@@ -431,7 +431,8 @@ export default function App() {
       return supabase.auth.signUp({ email, password });
     }
 
-    async function signIn(email, password) {
+    async function signIn(email, password, remember = true) {
+      localStorage.setItem("ledgerleaf_remember", remember ? "1" : "0");
       return supabase.auth.signInWithPassword({ email, password });
     }
 
@@ -666,6 +667,15 @@ export default function App() {
       lastSyncAt
     };
   }, [settings, transactions, ratesRecord, ratesWarning, session, syncConflicts, syncBusy, lastSyncAt]);
+
+  useEffect(() => {
+    if (!session?.user?.id || !ctx?.syncNow) return;
+    const seen = localStorage.getItem("ledgerleaf_tour_seen");
+    if (!seen) {
+      localStorage.setItem("ledgerleaf_tour_seen", "1");
+    }
+    ctx.syncNow();
+  }, [session, ctx]);
 
   if (loading || !ctx) {
     return (

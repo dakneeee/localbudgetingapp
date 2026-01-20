@@ -95,6 +95,16 @@ export default function Tour() {
   }, []);
 
   useEffect(() => {
+    function onTrigger() {
+      localStorage.removeItem(TOUR_STORAGE_KEY);
+      setStepIndex(0);
+      setOpen(true);
+    }
+    window.addEventListener("ledgerleaf-tour", onTrigger);
+    return () => window.removeEventListener("ledgerleaf-tour", onTrigger);
+  }, []);
+
+  useEffect(() => {
     if (!open) return;
     if (location.pathname !== step.path) {
       navigate(step.path);

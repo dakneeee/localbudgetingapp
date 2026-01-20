@@ -122,6 +122,11 @@ export default function Settings({ ctx }) {
     alert("Budget cycle reset to today.");
   }
 
+  function replayTutorial() {
+    localStorage.setItem("ledgerleaf_tour_force", "1");
+    window.dispatchEvent(new Event("ledgerleaf-tour"));
+  }
+
   async function onRefreshRates() {
     setBusy(true);
     try {
@@ -343,6 +348,7 @@ export default function Settings({ ctx }) {
               </div>
               <div className="actions">
                 <button className="btn primary" onClick={saveProfile} disabled={busy}>Save profile</button>
+                <button className="btn" onClick={replayTutorial}>Replay tutorial</button>
               </div>
             </div>
           ) : null}

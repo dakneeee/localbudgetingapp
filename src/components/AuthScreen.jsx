@@ -4,6 +4,7 @@ export default function AuthScreen({ onSignIn, onSignUp }) {
   const [mode, setMode] = useState("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
 
   async function handleSubmit(e) {
@@ -13,9 +14,11 @@ export default function AuthScreen({ onSignIn, onSignUp }) {
     setBusy(true);
     try {
       if (mode === "signin") {
-        const { error } = await onSignIn(emailTrimmed, password);
+        localStorage.setItem("ledgerleaf_remember", remember ? "1" : "0");
+        const { error } = await onSignIn(emailTrimmed, password, remember);
         if (error) alert(error.message);
       } else {
+        localStorage.setItem("ledgerleaf_remember", remember ? "1" : "0");
         const { error } = await onSignUp(emailTrimmed, password);
         if (error) alert(error.message);
         else {
@@ -71,6 +74,14 @@ export default function AuthScreen({ onSignIn, onSignUp }) {
               required
             />
           </div>
+          <label className="row" style={{ justifyContent: "flex-start", gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+            Keep me signed in
+          </label>
           <button className="btn primary" type="submit" disabled={busy}>
             {mode === "signin" ? "Sign in" : "Create account"}
           </button>
