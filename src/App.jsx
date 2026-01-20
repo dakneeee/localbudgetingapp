@@ -184,10 +184,14 @@ export default function App() {
 
     const inCycle = (t) => (!cycleStartISO || !cycleEndISO) ? true : (t.date >= cycleStartISO && t.date <= cycleEndISO);
 
+    const allIncomes = transactions.filter(t => t.type === "income");
+    const allExpenses = transactions.filter(t => t.type === "expense");
+    const allSavingsTxs = transactions.filter(t => t.type === "savings");
+
     // Derived totals (current cycle only):
-    const incomes = transactions.filter(t => t.type === "income" && inCycle(t));
-    const expenses = transactions.filter(t => t.type === "expense" && inCycle(t));
-    const savingsTxs = transactions.filter(t => t.type === "savings" && inCycle(t));
+    const incomes = allIncomes.filter(inCycle);
+    const expenses = allExpenses.filter(inCycle);
+    const savingsTxs = allSavingsTxs.filter(inCycle);
 
     const budgetSources = new Set(["Salary", "Freelance", "Allowance", "Scholarship"]);
 
@@ -204,16 +208,16 @@ export default function App() {
     const budgetIncomeBase = incomes
       .filter(t => incomeBucket(t) === "budget")
       .reduce((s, t) => s + (t.amountBase || 0), 0);
-    const extraIncomeBase = incomes
+    const extraIncomeBase = allIncomes
       .filter(t => incomeBucket(t) === "extra")
       .reduce((s, t) => s + (t.amountBase || 0), 0);
-    const savingsExtraBase = incomes
+    const savingsExtraBase = allIncomes
       .filter(t => incomeBucket(t) === "savings")
       .reduce((s, t) => s + (t.amountBase || 0), 0);
 
     const extraSpentBase = [
-      ...expenses.filter(e => e.expenseSource === "extra"),
-      ...savingsTxs.filter(s => s.savingsSource === "extra")
+      ...allExpenses.filter(e => e.expenseSource === "extra"),
+      ...allSavingsTxs.filter(s => s.savingsSource === "extra")
     ].reduce((s, t) => s + Math.abs(t.amountBase || 0), 0);
     const extraBalanceBase = extraIncomeBase - extraSpentBase;
 
@@ -319,6 +323,13 @@ export default function App() {
     async function removeTransaction(id) {
       await deleteTransaction(id);
       await refreshTransactions();
+      if (session?.user?.id) {
+        await supabase
+          .from("transactions")
+          .delete()
+          .eq("id", id)
+          .eq("user_id", session.user.id);
+      }
       await autoSyncIfEnabled();
     }
 
