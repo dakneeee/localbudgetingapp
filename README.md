@@ -1,4 +1,4 @@
-# localbudgetingapp
+# budgetingapp
 
 ## Getting started
 
