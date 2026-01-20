@@ -24,6 +24,8 @@ export default function Dashboard({ ctx }) {
     allocatedBase,
     spentBase,
     remainingBase,
+    enabledSavings,
+    cycleLabel,
     amountBaseToDisplay
   } = ctx;
   const display = settings.displayCurrency;
@@ -57,6 +59,10 @@ export default function Dashboard({ ctx }) {
           </strong>
         </div>
         <div className="pill">
+          <span className="muted">Cycle</span>
+          <strong className="mono">{cycleLabel}</strong>
+        </div>
+        <div className="pill">
           <span className="muted">Extra</span>
           <strong>
             <Money value={toDisplay(extraIncomeBase)} currency={display} />
@@ -69,7 +75,12 @@ export default function Dashboard({ ctx }) {
       <div className="panel">
         <div className="panel-inner">
           <div className="grid cols-2" data-tour="dashboard-buckets">
-            {BUCKETS.map((b) => {
+            {BUCKETS.filter((b) => {
+              if (b.key === "invest") return enabledSavings?.invest !== false;
+              if (b.key === "save_big") return enabledSavings?.save_big !== false;
+              if (b.key === "save_irregular") return enabledSavings?.save_irregular !== false;
+              return true;
+            }).map((b) => {
               const alloc = allocatedBase[b.key] || 0;
               const spent = spentBase[b.key] || 0;
               const rem = remainingBase[b.key] || 0;

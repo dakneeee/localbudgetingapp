@@ -17,18 +17,26 @@ export default function Transactions({ ctx }) {
     amountBaseToCurrency,
     amountCurrencyToBase,
     removeTransaction,
-    addOrUpdateTransaction
+    addOrUpdateTransaction,
+    enabledSavings
   } = ctx;
 
   const [displayCurrency, setDisplayCurrency] = useState(settings.displayCurrency);
 
   const [q, setQ] = useState("");
-  const [typeFilter, setTypeFilter] = useState("all"); // all | income | expense
+  const [typeFilter, setTypeFilter] = useState("all"); // all | income | expense | savings
   const [catFilter, setCatFilter] = useState("all"); // category key
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [rangePreset, setRangePreset] = useState("all"); // all | week | month | day
   const [editId, setEditId] = useState(null);
+
+  const activeCategories = EXPENSE_CATEGORIES.filter((c) => {
+    if (c.key === "invest") return enabledSavings?.invest !== false;
+    if (c.key === "save_big") return enabledSavings?.save_big !== false;
+    if (c.key === "save_irregular") return enabledSavings?.save_irregular !== false;
+    return true;
+  });
 
   function isoDaysAgo(days) {
     const d = new Date();
@@ -72,7 +80,9 @@ export default function Transactions({ ctx }) {
       .sort((a, b) => cmpDateDesc(a.date, b.date))
       .filter(t => {
         if (typeFilter !== "all" && t.type !== typeFilter) return false;
-        if (typeFilter === "expense" && catFilter !== "all" && (t.category !== catFilter)) return false;
+        if ((typeFilter === "expense" || typeFilter === "savings") && catFilter !== "all" && (t.category !== catFilter)) {
+          return false;
+        }
 
         if (fromDate && t.date < fromDate) return false;
         if (toDate && t.date > toDate) return false;
@@ -134,13 +144,14 @@ export default function Transactions({ ctx }) {
                 <option value="all">All</option>
                 <option value="income">Income</option>
                 <option value="expense">Expense</option>
+                <option value="savings">Savings</option>
               </select>
             </div>
             <div className="field">
-              <label>Expense Category</label>
-              <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} disabled={typeFilter !== "expense"}>
+              <label>Category</label>
+              <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} disabled={typeFilter === "income"}>
                 <option value="all">All categories</option>
-                {EXPENSE_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+                {activeCategories.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
               </select>
             </div>
           </div>
@@ -183,7 +194,7 @@ export default function Transactions({ ctx }) {
                   <tr><td colSpan={7} className="muted">No results.</td></tr>
                 ) : (
                   filtered.map(t => {
-                    const typeLabel = t.type === "income" ? "Income" : "Expense";
+                    const typeLabel = t.type === "income" ? "Income" : t.type === "savings" ? "Savings" : "Expense";
                     const src = t.type === "income" ? (t.source || "Income") : categoryLabel(t.category);
                     const amtBase = t.amountBase || 0;
                     const amtDisp = toDisplay(amtBase);
@@ -191,7 +202,7 @@ export default function Transactions({ ctx }) {
                       <tr key={t.id}>
                         <td className="mono">{formatDatePretty(t.date)}</td>
                         <td>
-                          <span className={`badge ${t.type === "income" ? "good" : "warn"}`}>{typeLabel}</span>
+                          <span className={`badge ${t.type === "income" ? "good" : t.type === "savings" ? "good" : "warn"}`}>{typeLabel}</span>
                         </td>
                         <td>{src}</td>
                         <td>
@@ -256,6 +267,8 @@ function EditModal({
 
   const [incomeSource, setIncomeSource] = useState("Salary");
   const [incomeCustom, setIncomeCustom] = useState("");
+  const [savingsCategory, setSavingsCategory] = useState("invest");
+  const [savingsSource, setSavingsSource] = useState("budget");
   const [incomeBucket, setIncomeBucket] = useState("budget");
 
   const [expenseCategory, setExpenseCategory] = useState("fixed");
@@ -284,6 +297,9 @@ function EditModal({
       } else {
         setIncomeBucket("budget");
       }
+    } else if (tx.type === "savings") {
+      setSavingsCategory(tx.category || "invest");
+      setSavingsSource(tx.savingsSource || "budget");
     } else {
       setExpenseCategory(tx.category || "fixed");
       setMerchant(tx.description || "");
@@ -314,6 +330,23 @@ function EditModal({
         incomeBucket,
         source: srcFinal,
         description: srcFinal,
+        note: note.trim() || null,
+        updatedAt: Date.now()
+      };
+      await addOrUpdateTransaction(next);
+      onClose();
+      return;
+    }
+    if (tx.type === "savings") {
+      const savingsLabel = EXPENSE_CATEGORIES.find(c => c.key === savingsCategory)?.label || "Savings";
+      const next = {
+        ...tx,
+        date,
+        amountBase: -Math.abs(baseAbs),
+        savingsSource,
+        category: savingsCategory,
+        source: savingsLabel,
+        description: savingsLabel,
         note: note.trim() || null,
         updatedAt: Date.now()
       };
@@ -373,6 +406,30 @@ function EditModal({
                   <option value="budget">Budget</option>
                   <option value="extra">Extra</option>
                   <option value="savings">Savings</option>
+                </select>
+              </div>
+            </div>
+          ) : tx.type === "savings" ? (
+            <div className="grid cols-2">
+              <div className="field">
+                <label>Savings category</label>
+                <select value={savingsCategory} onChange={(e) => setSavingsCategory(e.target.value)}>
+                  {enabledSavings?.invest !== false ? <option value="invest">Long-Term Investments</option> : null}
+                  {enabledSavings?.save_big !== false ? <option value="save_big">Big Goals</option> : null}
+                  {enabledSavings?.save_irregular !== false ? <option value="save_irregular">Irregular Expenses</option> : null}
+                  {["invest", "save_big", "save_irregular"].includes(savingsCategory)
+                    && ((savingsCategory === "invest" && enabledSavings?.invest === false)
+                      || (savingsCategory === "save_big" && enabledSavings?.save_big === false)
+                      || (savingsCategory === "save_irregular" && enabledSavings?.save_irregular === false))
+                    ? <option value={savingsCategory}>Current (disabled)</option>
+                    : null}
+                </select>
+              </div>
+              <div className="field">
+                <label>Source</label>
+                <select value={savingsSource} onChange={(e) => setSavingsSource(e.target.value)}>
+                  <option value="budget">Budget</option>
+                  <option value="extra">Extra</option>
                 </select>
               </div>
             </div>

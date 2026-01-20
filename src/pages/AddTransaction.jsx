@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import Money from "../components/Money.jsx";
 import { COMMON_CURRENCIES } from "../currency.js";
-import { EXPENSE_CATEGORIES, INCOME_SOURCES, isoToday, safeNumber, uuid, formatDatePretty } from "../utils.js";
+import { BUCKETS, EXPENSE_CATEGORIES, INCOME_SOURCES, isoToday, safeNumber, uuid, formatDatePretty } from "../utils.js";
 
 export default function AddTransaction({ ctx }) {
   const {
@@ -12,11 +12,15 @@ export default function AddTransaction({ ctx }) {
     amountBaseToCurrency,
     budgetIncomeBase,
     extraIncomeBase,
+    extraBalanceBase,
     remainingBase,
+    allocatedBase,
+    spentBase,
+    enabledSavings,
     addOrUpdateTransaction
   } = ctx;
 
-  const [mode, setMode] = useState("income"); // income | expense
+  const [mode, setMode] = useState("income"); // income | expense | savings
   const [date, setDate] = useState(isoToday());
   const [dateMode, setDateMode] = useState("today"); // today | yesterday | custom
   const [amount, setAmount] = useState("");
@@ -33,6 +37,10 @@ export default function AddTransaction({ ctx }) {
   const [expenseCategory, setExpenseCategory] = useState("fixed");
   const [merchant, setMerchant] = useState("");
   const [expenseSource, setExpenseSource] = useState("budget"); // budget | extra
+
+  // savings fields
+  const [savingsCategory, setSavingsCategory] = useState("invest");
+  const [savingsSource, setSavingsSource] = useState("budget"); // budget | extra
 
   const displayCurrency = settings.displayCurrency;
   const baseCurrency = settings.baseCurrency;
@@ -60,7 +68,7 @@ export default function AddTransaction({ ctx }) {
     return { base };
   }, [amount, amountCurrency, amountCurrencyToBase]);
 
-  const hasFunds = expenseSource === "extra"
+  const hasFunds = (mode === "expense" ? expenseSource : savingsSource) === "extra"
     ? extraIncomeBase > 0
     : budgetIncomeBase > 0;
   const canConvert = rateToInput !== null && (mode === "expense" ? hasFunds : true);
@@ -73,8 +81,9 @@ export default function AddTransaction({ ctx }) {
       alert("Amount must be a positive number.");
       return;
     }
-    if (mode === "expense" && !hasFunds) {
-      alert(`No ${expenseSource} balance available. Add income first.`);
+    if ((mode === "expense" || mode === "savings") && !hasFunds) {
+      const sourceLabel = mode === "expense" ? expenseSource : savingsSource;
+      alert(`No ${sourceLabel} balance available. Add income first.`);
       return;
     }
     if (!canConvert) {
@@ -115,36 +124,58 @@ export default function AddTransaction({ ctx }) {
       return;
     }
 
-    // expense
-    const catObj = EXPENSE_CATEGORIES.find(c => c.key === expenseCategory);
-    const catLabel = catObj ? catObj.label : "Expense";
-    const label = merchant.trim() || catLabel;
+    if (mode === "expense") {
+      const catObj = EXPENSE_CATEGORIES.find(c => c.key === expenseCategory);
+      const catLabel = catObj ? catObj.label : "Expense";
+      const label = merchant.trim() || catLabel;
 
-    const tx = {
+      const tx = {
+        id: uuid(),
+        type: "expense",
+        date,
+        amountBase: -Math.abs(base),
+        expenseSource,
+        inputCurrency: amountCurrency,
+        category: expenseCategory,
+        source: catLabel,
+        description: label,
+        note: note.trim() || null,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+      await addOrUpdateTransaction(tx);
+      setAmount("");
+      setNote("");
+      setMerchant("");
+      alert("Expense added.");
+      return;
+    }
+
+    const savingsLabel = EXPENSE_CATEGORIES.find(c => c.key === savingsCategory)?.label || "Savings";
+    const savingsTx = {
       id: uuid(),
-      type: "expense",
+      type: "savings",
       date,
       amountBase: -Math.abs(base),
-      expenseSource,
+      savingsSource,
       inputCurrency: amountCurrency,
-      category: expenseCategory,
-      source: catLabel,
-      description: label,
+      category: savingsCategory,
+      source: savingsLabel,
+      description: savingsLabel,
       note: note.trim() || null,
       createdAt: Date.now(),
       updatedAt: Date.now()
     };
-    await addOrUpdateTransaction(tx);
+    await addOrUpdateTransaction(savingsTx);
     setAmount("");
     setNote("");
-    setMerchant("");
-    alert("Expense added.");
+    alert("Savings added.");
   }
 
   const amountDisplay = safeNumber(amount);
   const amountBaseForDisplay = preview?.base ?? null;
   const budgetBalanceDisplay = amountBaseToCurrency(budgetIncomeBase || 0, displayCurrency);
-  const extraBalanceDisplay = amountBaseToCurrency(extraIncomeBase || 0, displayCurrency);
+  const extraBalanceDisplay = amountBaseToCurrency(extraBalanceBase ?? extraIncomeBase ?? 0, displayCurrency);
   const remainingBaseForCategory = mode === "expense" ? (remainingBase?.[expenseCategory] || 0) : null;
   const remainingAfterBase = mode === "expense" && Number.isFinite(amountBaseForDisplay)
     ? remainingBaseForCategory - Math.abs(amountBaseForDisplay)
@@ -152,6 +183,35 @@ export default function AddTransaction({ ctx }) {
   const remainingAfterDisplay = Number.isFinite(remainingAfterBase)
     ? amountBaseToCurrency(remainingAfterBase, displayCurrency)
     : null;
+
+  function bucketLabel(key) {
+    const found = BUCKETS.find(b => b.key === key);
+    return found ? found.label : key;
+  }
+
+  const activeBuckets = BUCKETS.filter((b) => {
+    if (b.key === "invest") return enabledSavings?.invest !== false;
+    if (b.key === "save_big") return enabledSavings?.save_big !== false;
+    if (b.key === "save_irregular") return enabledSavings?.save_irregular !== false;
+    return true;
+  });
+
+  const savingsOptions = [
+    enabledSavings?.invest !== false ? { key: "invest", label: "Long-Term Investments" } : null,
+    enabledSavings?.save_big !== false ? { key: "save_big", label: "Big Goals" } : null,
+    enabledSavings?.save_irregular !== false ? { key: "save_irregular", label: "Irregular Expenses" } : null
+  ].filter(Boolean);
+
+  React.useEffect(() => {
+    if (!savingsOptions.length) {
+      if (mode === "savings") setMode("expense");
+      return;
+    }
+    if (!savingsOptions.find((o) => o.key === savingsCategory)) {
+      setSavingsCategory(savingsOptions[0].key);
+    }
+  }, [enabledSavings, savingsCategory, savingsOptions.length, mode]);
+
 
   return (
     <div className="container">
@@ -167,12 +227,6 @@ export default function AddTransaction({ ctx }) {
           <span className="muted">Rate</span>
           <strong className="mono">
             {rateToInput ? `1 ${baseCurrency} = ${rateToInput.toFixed(4)} ${amountCurrency}` : "—"}
-          </strong>
-        </div>
-        <div className="pill">
-          <span className="muted">Budget</span>
-          <strong className="mono">
-            <Money value={budgetBalanceDisplay ?? 0} currency={displayCurrency} />
           </strong>
         </div>
         <div className="pill">
@@ -194,9 +248,16 @@ export default function AddTransaction({ ctx }) {
             <button className={`btn ${mode === "expense" ? "primary" : ""}`} onClick={() => setMode("expense")}>
               Expense
             </button>
+            {savingsOptions.length ? (
+              <button className={`btn ${mode === "savings" ? "primary" : ""}`} onClick={() => setMode("savings")}>
+                Savings
+              </button>
+            ) : null}
           </div>
 
-          <form className="form" onSubmit={onSubmit} style={{ marginTop: 12 }}>
+          <div className="split">
+            <div>
+              <form className="form" onSubmit={onSubmit} style={{ marginTop: 12 }}>
             <div className="grid cols-2">
               <div className="field">
                 <label>Date</label>
@@ -270,14 +331,15 @@ export default function AddTransaction({ ctx }) {
                   </div>
                 ) : null}
               </div>
-          ) : (
-            <div className="grid cols-2">
-              <div className="field">
-                <label>Category</label>
-                <select value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)}>
-                  {EXPENSE_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
-                </select>
-              </div>
+            ) : mode === "expense" ? (
+              <div className="grid cols-2">
+                <div className="field">
+                  <label>Category</label>
+                  <select value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)}>
+                    {EXPENSE_CATEGORIES.filter(c => !["invest", "save_big", "save_irregular"].includes(c.key))
+                      .map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+                  </select>
+                </div>
               <div className="field">
                 <label>Merchant / Label</label>
                 <input
@@ -292,9 +354,27 @@ export default function AddTransaction({ ctx }) {
                   <option value="budget">Budget</option>
                   <option value="extra">Extra</option>
                 </select>
+                </div>
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="grid cols-2">
+                <div className="field">
+                  <label>Savings category</label>
+                  <select value={savingsCategory} onChange={(e) => setSavingsCategory(e.target.value)}>
+                    {savingsOptions.map((o) => (
+                      <option key={o.key} value={o.key}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Source</label>
+                  <select value={savingsSource} onChange={(e) => setSavingsSource(e.target.value)}>
+                    <option value="budget">Budget</option>
+                    <option value="extra">Extra</option>
+                  </select>
+                </div>
+              </div>
+            )}
 
             <div className="field">
               <label>Note (optional)</label>
@@ -341,19 +421,123 @@ export default function AddTransaction({ ctx }) {
               ) : null}
             </div>
 
-            <div className="actions">
-              <button className="btn primary" type="submit" disabled={!canConvert}>
-                Save {mode === "income" ? "Income" : "Expense"}
-              </button>
-              {!canConvert ? (
-                <div className="notice warn" style={{ flex: 1 }}>
-                  {rateToInput === null
-                    ? "Exchange rates unavailable. Go to Settings → Refresh rates."
-                    : `No ${expenseSource} balance available.`}
+                <div className="actions">
+                  <button className="btn primary" type="submit" disabled={!canConvert}>
+                    Save {mode === "income" ? "Income" : mode === "expense" ? "Expense" : "Savings"}
+                  </button>
+                  {!canConvert ? (
+                    <div className="notice warn" style={{ flex: 1 }}>
+                    {rateToInput === null
+                        ? "Exchange rates unavailable. Go to Settings → Refresh rates."
+                        : `No ${(mode === "expense" ? expenseSource : savingsSource)} balance available.`}
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
+              </form>
             </div>
-          </form>
+
+            {mode === "expense" ? (
+              <div className="card">
+                <h3>Remaining balance</h3>
+                <div className="sub" style={{ marginBottom: 8 }}>
+                  This expense will reduce: <strong>{bucketLabel(expenseCategory)}</strong>
+                </div>
+                <div className="notice" style={{ marginBottom: 8 }}>
+                  Extra balance:{" "}
+                  <strong>
+                    <Money value={extraBalanceDisplay ?? 0} currency={displayCurrency} />
+                  </strong>
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Category</th>
+                        <th>Remaining</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeBuckets.map((b) => {
+                        const rem = remainingBase?.[b.key] || 0;
+                        return (
+                          <tr key={b.key}>
+                            <td>
+                              {bucketLabel(b.key)}
+                              {b.key === expenseCategory ? " (used)" : ""}
+                            </td>
+                            <td className="mono">
+                              <Money value={amountBaseToCurrency(rem, displayCurrency) || 0} currency={displayCurrency} />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : mode === "income" ? (
+              <div className="card">
+                <h3>Framework overview</h3>
+                <div className="sub" style={{ marginBottom: 8 }}>
+                  50–60% — Fixed Costs. Regular bills you must pay to live: rent, mortgage, utilities, insurance, loan payments.
+                </div>
+                <div className="sub" style={{ marginBottom: 8 }}>
+                  10% — Long-Term Investing. Money set aside for the future, like retirement or index funds.
+                </div>
+                <div className="sub" style={{ marginBottom: 8 }}>
+                  20% — Savings. Set aside for things that are not monthly.
+                </div>
+                <div className="sub" style={{ marginLeft: 12, marginBottom: 6 }}>
+                  10% Big Goals — House deposit, moving, long-term plans.
+                </div>
+                <div className="sub" style={{ marginLeft: 12, marginBottom: 8 }}>
+                  10% Irregular Costs — Travel, gifts, yearly fees, events.
+                </div>
+                <div className="sub">
+                  10–20% — Spending. Money for wants and day-to-day choices. No rules beyond staying within the amount.
+                </div>
+              </div>
+            ) : (
+              <div className="card">
+                <h3>Remaining balance</h3>
+                <div className="sub" style={{ marginBottom: 8 }}>
+                  This savings entry will reduce: <strong>{bucketLabel(savingsCategory)}</strong>
+                </div>
+                <div className="notice" style={{ marginBottom: 8 }}>
+                  Extra balance:{" "}
+                  <strong>
+                    <Money value={extraBalanceDisplay ?? 0} currency={displayCurrency} />
+                  </strong>
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Category</th>
+                        <th>Remaining</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeBuckets.map((b) => {
+                        const rem = remainingBase?.[b.key] || 0;
+                        return (
+                          <tr key={b.key}>
+                            <td>
+                              {bucketLabel(b.key)}
+                              {b.key === savingsCategory ? " (used)" : ""}
+                            </td>
+                            <td className="mono">
+                              <Money value={amountBaseToCurrency(rem, displayCurrency) || 0} currency={displayCurrency} />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

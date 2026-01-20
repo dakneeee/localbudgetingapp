@@ -28,6 +28,12 @@ export async function loadSettings() {
   const db = await getDB();
   const s = await db.get("settings", "app");
   if (s) {
+    if (!s.enabledSavings) {
+      s.enabledSavings = { invest: true, save_big: true, save_irregular: true };
+    }
+    if (!s.cycleStartISO) {
+      s.cycleStartISO = new Date().toISOString().slice(0, 10);
+    }
     if (!s.updatedAt) {
       s.updatedAt = Date.now();
       await db.put("settings", s, "app");
@@ -41,6 +47,8 @@ export async function loadSettings() {
     displayCurrency: "USD",
     name: "",
     theme: DEFAULT_THEME_KEY,
+    enabledSavings: { invest: true, save_big: true, save_irregular: true },
+    cycleStartISO: new Date().toISOString().slice(0, 10),
     allocations: defaultAllocations(),
     createdAt: Date.now(),
     updatedAt: Date.now()

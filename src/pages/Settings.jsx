@@ -27,11 +27,18 @@ export default function Settings({ ctx }) {
     syncBusy,
     session,
     lastSyncAt,
-    amountBaseToDisplay
+    amountBaseToDisplay,
+    cycleStartISO,
+    cycleEndISO,
+    cycleLabel
   } = ctx;
 
   const [fixedPct, setFixedPct] = useState(String(settings.allocations.fixedPct));
   const [guiltPct, setGuiltPct] = useState(String(settings.allocations.guiltFreePct));
+  const [investPct, setInvestPct] = useState(String(settings.allocations.investPct));
+  const [saveBigPct, setSaveBigPct] = useState(String(settings.allocations.saveBigPct));
+  const [saveIrregularPct, setSaveIrregularPct] = useState(String(settings.allocations.saveIrregularPct));
+  const [enabledSavings, setEnabledSavings] = useState(settings.enabledSavings || { invest: true, save_big: true, save_irregular: true });
   const [period, setPeriod] = useState(settings.period);
   const [baseCurrency, setBaseCurrency] = useState(settings.baseCurrency);
   const [displayCurrency, setDisplayCurrency] = useState(settings.displayCurrency);
@@ -49,13 +56,13 @@ export default function Settings({ ctx }) {
   const computedAlloc = useMemo(() => {
     const a = {
       fixedPct: safeNumber(fixedPct),
-      investPct: 10,
-      saveBigPct: 10,
-      saveIrregularPct: 10,
+      investPct: safeNumber(investPct),
+      saveBigPct: safeNumber(saveBigPct),
+      saveIrregularPct: safeNumber(saveIrregularPct),
       guiltFreePct: safeNumber(guiltPct)
     };
-    return { a, v: validateAllocations(a) };
-  }, [fixedPct, guiltPct]);
+    return { a, v: validateAllocations(a, enabledSavings) };
+  }, [fixedPct, guiltPct, investPct, saveBigPct, saveIrregularPct, enabledSavings]);
 
   useEffect(() => {
     if (!syncConflicts) return;
@@ -81,6 +88,7 @@ export default function Settings({ ctx }) {
       period,
       displayCurrency,
       theme: DEFAULT_THEME_KEY,
+      enabledSavings,
       allocations: computedAlloc.a
     });
 
@@ -106,6 +114,12 @@ export default function Settings({ ctx }) {
   async function saveProfile() {
     await updateSettings({ name: name.trim() });
     alert("Profile saved.");
+  }
+
+  async function resetCycle() {
+    const today = new Date().toISOString().slice(0, 10);
+    await updateSettings({ cycleStartISO: today });
+    alert("Budget cycle reset to today.");
   }
 
   async function onRefreshRates() {
@@ -258,6 +272,16 @@ export default function Settings({ ctx }) {
     const d = defaultAllocations();
     setFixedPct(String(d.fixedPct));
     setGuiltPct(String(d.guiltFreePct));
+    setInvestPct(String(d.investPct));
+    setSaveBigPct(String(d.saveBigPct));
+    setSaveIrregularPct(String(d.saveIrregularPct));
+  }
+  function toggleSavings(key) {
+    const next = { ...enabledSavings, [key]: !enabledSavings[key] };
+    setEnabledSavings(next);
+    if (key === "invest" && enabledSavings.invest) setInvestPct("0");
+    if (key === "save_big" && enabledSavings.save_big) setSaveBigPct("0");
+    if (key === "save_irregular" && enabledSavings.save_irregular) setSaveIrregularPct("0");
   }
 
   const lastUpdated = ratesRecord?.fetchedAt
@@ -358,12 +382,40 @@ export default function Settings({ ctx }) {
                 <div className="notice" style={{ marginTop: 10 }}>
                   If refresh fails, cached rates are used with a warning. Transactions are always stored in base currency.
                 </div>
+
+                <div className="notice" style={{ marginTop: 10 }}>
+                  Current cycle: <strong>{cycleLabel}</strong>
+                  <div className="muted" style={{ marginTop: 4 }}>
+                    {cycleStartISO} → {cycleEndISO}
+                  </div>
+                  <div className="actions">
+                    <button className="btn" onClick={resetCycle} disabled={busy}>
+                      Reset cycle to today
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div className="card">
                 <h3>Allocations (framework)</h3>
 
-              <div className="grid cols-2">
+              <div className="notice" style={{ marginTop: 8 }}>
+                Toggle any savings categories you want to exclude. Disabled categories must be 0%.
+              </div>
+
+              <div className="actions">
+                <button className={`btn ${enabledSavings.invest ? "primary" : ""}`} type="button" onClick={() => toggleSavings("invest")}>
+                  Long-Term Investing
+                </button>
+                <button className={`btn ${enabledSavings.save_big ? "primary" : ""}`} type="button" onClick={() => toggleSavings("save_big")}>
+                  Big Goals
+                </button>
+                <button className={`btn ${enabledSavings.save_irregular ? "primary" : ""}`} type="button" onClick={() => toggleSavings("save_irregular")}>
+                  Irregular Costs
+                </button>
+              </div>
+
+              <div className="grid cols-2" style={{ marginTop: 10 }}>
                 <div className="field">
                   <label>Fixed Costs % (50–60)</label>
                   <input value={fixedPct} onChange={(e) => setFixedPct(e.target.value)} inputMode="numeric" />
@@ -372,20 +424,32 @@ export default function Settings({ ctx }) {
                   <label>Guilt-Free % (10–20)</label>
                   <input value={guiltPct} onChange={(e) => setGuiltPct(e.target.value)} inputMode="numeric" />
                 </div>
-              </div>
-
-              <div className="notice" style={{ marginTop: 8 }}>
-                <div className="row">
-                  <div className="muted">Long-Term Investments</div>
-                  <div className="mono">10%</div>
+                <div className="field">
+                  <label>Long-Term %</label>
+                  <input
+                    value={investPct}
+                    onChange={(e) => setInvestPct(e.target.value)}
+                    inputMode="numeric"
+                    disabled={!enabledSavings.invest}
+                  />
                 </div>
-                <div className="row">
-                  <div className="muted">Savings: Big Goals</div>
-                  <div className="mono">10%</div>
+                <div className="field">
+                  <label>Big Goals %</label>
+                  <input
+                    value={saveBigPct}
+                    onChange={(e) => setSaveBigPct(e.target.value)}
+                    inputMode="numeric"
+                    disabled={!enabledSavings.save_big}
+                  />
                 </div>
-                <div className="row">
-                  <div className="muted">Savings: Irregular Expenses</div>
-                  <div className="mono">10%</div>
+                <div className="field">
+                  <label>Irregular %</label>
+                  <input
+                    value={saveIrregularPct}
+                    onChange={(e) => setSaveIrregularPct(e.target.value)}
+                    inputMode="numeric"
+                    disabled={!enabledSavings.save_irregular}
+                  />
                 </div>
               </div>
 

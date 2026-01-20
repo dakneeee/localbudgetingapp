@@ -86,7 +86,7 @@ export function defaultAllocations() {
   };
 }
 
-export function validateAllocations(a) {
+export function validateAllocations(a, enabledSavings = { invest: true, save_big: true, save_irregular: true }) {
   const errors = [];
   const fixed = safeNumber(a.fixedPct);
   const guilt = safeNumber(a.guiltFreePct);
@@ -104,9 +104,13 @@ export function validateAllocations(a) {
     errors.push("Guilt-Free Spending must be between 10 and 20 (inclusive).");
   }
 
-  // Invest 10; Savings split 10/10 by spec (fixed). We still validate they sum correctly.
-  if (invest !== 10) errors.push("Long-Term Investments must be fixed at 10%.");
-  if (big !== 10 || irr !== 10) errors.push("Savings must be 20% total split into 10% Big Goals and 10% Irregular Expenses.");
+  const investEnabled = !!enabledSavings.invest;
+  const bigEnabled = !!enabledSavings.save_big;
+  const irrEnabled = !!enabledSavings.save_irregular;
+
+  if (!investEnabled && invest !== 0) errors.push("Long-Term Investments must be 0% when disabled.");
+  if (!bigEnabled && big !== 0) errors.push("Big Goals must be 0% when disabled.");
+  if (!irrEnabled && irr !== 0) errors.push("Irregular Expenses must be 0% when disabled.");
 
   const total = fixed + invest + big + irr + guilt;
   if (Number.isFinite(total) && Math.abs(total - 100) > 1e-9) {

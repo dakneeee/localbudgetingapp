@@ -12,8 +12,10 @@ export default function Savings({ ctx }) {
     ratesWarning,
     savingsGoalBase,
     savingsSavedBase,
+    savingsProgressBase,
     savingsTotalBase,
     savingsExtraBase,
+    enabledSavings,
     amountBaseToDisplay
   } = ctx;
   const display = settings.displayCurrency;
@@ -25,21 +27,21 @@ export default function Savings({ ctx }) {
 
   const longTermProgress = useMemo(() => {
     const goal = savingsGoalBase.longTerm || 0;
-    const saved = savingsSavedBase.longTerm || 0;
+    const saved = savingsProgressBase.longTerm || 0;
     if (goal <= 0) return 0;
     return saved / goal;
   }, [savingsGoalBase, savingsSavedBase]);
 
   const bigProgress = useMemo(() => {
     const goal = savingsGoalBase.big || 0;
-    const saved = savingsSavedBase.big || 0;
+    const saved = savingsProgressBase.big || 0;
     if (goal <= 0) return 0;
     return saved / goal;
   }, [savingsGoalBase, savingsSavedBase]);
 
   const irregularProgress = useMemo(() => {
     const goal = savingsGoalBase.irregular || 0;
-    const saved = savingsSavedBase.irregular || 0;
+    const saved = savingsProgressBase.irregular || 0;
     if (goal <= 0) return 0;
     return saved / goal;
   }, [savingsGoalBase, savingsSavedBase]);
@@ -47,8 +49,9 @@ export default function Savings({ ctx }) {
   const totalGoalBase = (savingsGoalBase.longTerm || 0) + (savingsGoalBase.big || 0) + (savingsGoalBase.irregular || 0);
   const totalProgress = useMemo(() => {
     if (totalGoalBase <= 0) return 0;
-    return (savingsTotalBase || 0) / totalGoalBase;
-  }, [savingsTotalBase, totalGoalBase]);
+    const savedOnly = (savingsProgressBase.longTerm || 0) + (savingsProgressBase.big || 0) + (savingsProgressBase.irregular || 0);
+    return savedOnly / totalGoalBase;
+  }, [savingsSavedBase, totalGoalBase]);
 
   return (
     <div className="container">
@@ -70,6 +73,7 @@ export default function Savings({ ctx }) {
       <div className="panel">
         <div className="panel-inner">
           <div className="grid cols-2" data-tour="savings-cards">
+            {enabledSavings?.invest !== false ? (
             <div className="card">
               <div className="row">
                 <h3 style={{ margin: 0 }}>Long-Term Investments</h3>
@@ -93,7 +97,7 @@ export default function Savings({ ctx }) {
 
               <div style={{ marginTop: 10 }}>
                 <div className="row">
-                  <div className="sub">Progress (saved vs goal)</div>
+                  <div className="sub">This {settings.period === "weekly" ? "week's" : "month's"} progress</div>
                   <div className="mono muted">{pct(longTermProgress)}</div>
                 </div>
                 <div className="progress" aria-label="Long-term savings progress">
@@ -101,7 +105,9 @@ export default function Savings({ ctx }) {
                 </div>
               </div>
             </div>
+            ) : null}
 
+            {enabledSavings?.save_big !== false ? (
             <div className="card">
               <div className="row">
                 <h3 style={{ margin: 0 }}>Big Goals</h3>
@@ -125,7 +131,7 @@ export default function Savings({ ctx }) {
 
               <div style={{ marginTop: 10 }}>
                 <div className="row">
-                  <div className="sub">Progress (saved vs goal)</div>
+                  <div className="sub">This {settings.period === "weekly" ? "week's" : "month's"} progress</div>
                   <div className="mono muted">{pct(bigProgress)}</div>
                 </div>
                 <div className="progress" aria-label="Big goals progress">
@@ -133,7 +139,9 @@ export default function Savings({ ctx }) {
                 </div>
               </div>
             </div>
+            ) : null}
 
+            {enabledSavings?.save_irregular !== false ? (
             <div className="card">
               <div className="row">
                 <h3 style={{ margin: 0 }}>Irregular Expenses</h3>
@@ -157,7 +165,7 @@ export default function Savings({ ctx }) {
 
               <div style={{ marginTop: 10 }}>
                 <div className="row">
-                  <div className="sub">Progress (saved vs goal)</div>
+                  <div className="sub">This {settings.period === "weekly" ? "week's" : "month's"} progress</div>
                   <div className="mono muted">{pct(irregularProgress)}</div>
                 </div>
                 <div className="progress" aria-label="Irregular expenses progress">
@@ -165,10 +173,11 @@ export default function Savings({ ctx }) {
                 </div>
               </div>
             </div>
+            ) : null}
           </div>
 
           <div className="notice" style={{ marginTop: 12 }}>
-            Total savings includes your saved amounts plus any gift income you choose to add to savings.
+            Progress only increases when you log savings as expenses in those categories. Extras count toward total only.
           </div>
 
           <div className="card" style={{ marginTop: 12 }}>
@@ -177,9 +186,6 @@ export default function Savings({ ctx }) {
               <span className="mono">
                 <Money value={toDisplay(savingsTotalBase)} currency={display} />
               </span>
-            </div>
-            <div className="sub" style={{ marginTop: 6 }}>
-              Extra added to savings: <Money value={toDisplay(savingsExtraBase)} currency={display} />
             </div>
             <div style={{ marginTop: 10 }}>
               <div className="row">

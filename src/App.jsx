@@ -38,6 +38,57 @@ export default function App() {
   const [lastSyncAt, setLastSyncAt] = useState(0);
   const location = useLocation();
 
+  function toISO(d) {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  function addDays(d, days) {
+    const next = new Date(d);
+    next.setDate(next.getDate() + days);
+    return next;
+  }
+
+  function addMonths(d, months) {
+    const next = new Date(d);
+    const day = next.getDate();
+    next.setMonth(next.getMonth() + months, 1);
+    const daysInMonth = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+    next.setDate(Math.min(day, daysInMonth));
+    return next;
+  }
+
+  function getCycleRange(period, cycleStartISO) {
+    const today = new Date();
+    const start = cycleStartISO ? new Date(`${cycleStartISO}T00:00:00`) : new Date(`${toISO(today)}T00:00:00`);
+    if (period === "weekly") {
+      const diffDays = Math.floor((today - start) / 86400000);
+      const cycles = diffDays >= 0 ? Math.floor(diffDays / 7) : 0;
+      const cycleStart = addDays(start, cycles * 7);
+      const cycleEnd = addDays(cycleStart, 6);
+      return { startISO: toISO(cycleStart), endISO: toISO(cycleEnd), startDate: cycleStart };
+    }
+    const monthsDiff = (today.getFullYear() - start.getFullYear()) * 12 + (today.getMonth() - start.getMonth());
+    const cycles = monthsDiff >= 0 ? monthsDiff : 0;
+    const cycleStart = addMonths(start, cycles);
+    const cycleEnd = addDays(addMonths(cycleStart, 1), -1);
+    return { startISO: toISO(cycleStart), endISO: toISO(cycleEnd), startDate: cycleStart };
+  }
+
+  function getWeekLabel(startDate) {
+    const month = startDate.toLocaleString(undefined, { month: "long" });
+    const year = startDate.getFullYear();
+    const first = new Date(year, startDate.getMonth(), 1);
+    const firstDay = first.getDay();
+    const dayIndex = (startDate.getDate() - 1) + firstDay;
+    const week = Math.floor(dayIndex / 7) + 1;
+    const daysInMonth = new Date(year, startDate.getMonth() + 1, 0).getDate();
+    const weeksInMonth = Math.ceil((daysInMonth + firstDay) / 7);
+    return `Week ${week} of ${weeksInMonth} [${month}]`;
+  }
+
   function getLastSync(userId) {
     if (!userId) return 0;
     return Number(localStorage.getItem(`${SYNC_KEY_PREFIX}${userId}`)) || 0;
@@ -95,7 +146,7 @@ export default function App() {
   const ctx = useMemo(() => {
     if (!settings) return null;
 
-    const allocValidation = validateAllocations(settings.allocations);
+    const allocValidation = validateAllocations(settings.allocations, settings.enabledSavings);
 
     const rateToDisplay = ratesRecord ? getRate(ratesRecord, settings.displayCurrency) : null;
 
@@ -123,9 +174,20 @@ export default function App() {
       return convertDisplayToBase(amountDisplay, ratesRecord, currency);
     }
 
-    // Derived totals:
-    const incomes = transactions.filter(t => t.type === "income");
-    const expenses = transactions.filter(t => t.type === "expense");
+    const { startISO: cycleStartISO, endISO: cycleEndISO, startDate: cycleStartDate } = getCycleRange(
+      settings.period,
+      settings.cycleStartISO
+    );
+    const cycleLabel = settings.period === "weekly"
+      ? getWeekLabel(cycleStartDate)
+      : cycleStartDate.toLocaleString(undefined, { month: "long", year: "numeric" });
+
+    const inCycle = (t) => (!cycleStartISO || !cycleEndISO) ? true : (t.date >= cycleStartISO && t.date <= cycleEndISO);
+
+    // Derived totals (current cycle only):
+    const incomes = transactions.filter(t => t.type === "income" && inCycle(t));
+    const expenses = transactions.filter(t => t.type === "expense" && inCycle(t));
+    const savingsTxs = transactions.filter(t => t.type === "savings" && inCycle(t));
 
     const budgetSources = new Set(["Salary", "Freelance", "Allowance", "Scholarship"]);
 
@@ -149,13 +211,20 @@ export default function App() {
       .filter(t => incomeBucket(t) === "savings")
       .reduce((s, t) => s + (t.amountBase || 0), 0);
 
+    const extraSpentBase = [
+      ...expenses.filter(e => e.expenseSource === "extra"),
+      ...savingsTxs.filter(s => s.savingsSource === "extra")
+    ].reduce((s, t) => s + Math.abs(t.amountBase || 0), 0);
+    const extraBalanceBase = extraIncomeBase - extraSpentBase;
+
     // Allocation amounts are based on budget income and framework.
     const a = settings.allocations;
+    const enabledSavings = settings.enabledSavings || { invest: true, save_big: true, save_irregular: true };
     const allocatedBase = {
       fixed: budgetIncomeBase * (a.fixedPct / 100),
-      invest: budgetIncomeBase * (a.investPct / 100),
-      save_big: budgetIncomeBase * (a.saveBigPct / 100),
-      save_irregular: budgetIncomeBase * (a.saveIrregularPct / 100),
+      invest: enabledSavings.invest ? budgetIncomeBase * (a.investPct / 100) : 0,
+      save_big: enabledSavings.save_big ? budgetIncomeBase * (a.saveBigPct / 100) : 0,
+      save_irregular: enabledSavings.save_irregular ? budgetIncomeBase * (a.saveIrregularPct / 100) : 0,
       guiltfree: budgetIncomeBase * (a.guiltFreePct / 100)
     };
 
@@ -167,9 +236,17 @@ export default function App() {
       guiltfree: 0
     };
     for (const e of expenses) {
+      if (e.expenseSource === "extra") continue;
       const k = e.category;
       if (k && spentBase[k] !== undefined) {
         spentBase[k] += Math.abs(e.amountBase || 0);
+      }
+    }
+    for (const s of savingsTxs) {
+      if (s.savingsSource === "extra") continue;
+      const k = s.category;
+      if (k && spentBase[k] !== undefined) {
+        spentBase[k] += Math.abs(s.amountBase || 0);
       }
     }
 
@@ -183,12 +260,39 @@ export default function App() {
       big: allocatedBase.save_big,
       irregular: allocatedBase.save_irregular
     };
-    const savingsSavedBase = {
-      longTerm: allocatedBase.invest - spentBase.invest,
-      big: allocatedBase.save_big - spentBase.save_big,
-      irregular: allocatedBase.save_irregular - spentBase.save_irregular
+    const savingsAddedAll = {
+      longTerm: 0,
+      big: 0,
+      irregular: 0
     };
-    const savingsTotalBase = savingsSavedBase.longTerm + savingsSavedBase.big + savingsSavedBase.irregular + savingsExtraBase;
+    const savingsAddedBudget = {
+      longTerm: 0,
+      big: 0,
+      irregular: 0
+    };
+    for (const s of savingsTxs) {
+      const amt = Math.abs(s.amountBase || 0);
+      if (s.category === "invest") savingsAddedAll.longTerm += amt;
+      if (s.category === "save_big") savingsAddedAll.big += amt;
+      if (s.category === "save_irregular") savingsAddedAll.irregular += amt;
+      if (s.savingsSource !== "extra") {
+        if (s.category === "invest") savingsAddedBudget.longTerm += amt;
+        if (s.category === "save_big") savingsAddedBudget.big += amt;
+        if (s.category === "save_irregular") savingsAddedBudget.irregular += amt;
+      }
+    }
+
+    const savingsSavedBase = {
+      longTerm: enabledSavings.invest ? savingsAddedAll.longTerm : 0,
+      big: enabledSavings.save_big ? savingsAddedAll.big : 0,
+      irregular: enabledSavings.save_irregular ? savingsAddedAll.irregular : 0
+    };
+    const savingsProgressBase = {
+      longTerm: enabledSavings.invest ? savingsAddedBudget.longTerm : 0,
+      big: enabledSavings.save_big ? savingsAddedBudget.big : 0,
+      irregular: enabledSavings.save_irregular ? savingsAddedBudget.irregular : 0
+    };
+    const savingsTotalBase = savingsSavedBase.longTerm + savingsSavedBase.big + savingsSavedBase.irregular;
 
     // CRUD helpers:
     async function refreshTransactions() {
@@ -493,16 +597,22 @@ export default function App() {
       ratesRecord,
       ratesWarning,
       allocValidation,
+      enabledSavings,
       totalIncomeBase,
       budgetIncomeBase,
       extraIncomeBase,
+      extraBalanceBase,
       savingsExtraBase,
       allocatedBase,
       spentBase,
       remainingBase,
       savingsGoalBase,
       savingsSavedBase,
+      savingsProgressBase,
       savingsTotalBase,
+      cycleStartISO,
+      cycleEndISO,
+      cycleLabel,
       rateToDisplay,
       amountBaseToDisplay,
       amountDisplayToBase,
